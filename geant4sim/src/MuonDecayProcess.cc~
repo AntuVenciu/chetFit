@@ -1,0 +1,45 @@
+// MuonDecayProcess.cc
+#include "MuonDecayProcess.hh"
+#include "G4DecayWithSpin.hh"
+#include "G4ParticleDefinition.hh"
+#include "G4ProcessManager.hh"
+#include "G4MuonPlus.hh"
+#include "G4MuonMinus.hh"
+
+namespace B1 {
+
+  MuonDecayProcess::MuonDecayProcess() : G4VPhysicsConstructor("MuonDecayProcess") {}
+
+  MuonDecayProcess::~MuonDecayProcess() {}
+
+  void MuonDecayProcess::ConstructParticle() {
+    // Define muon particles
+    G4MuonPlus::MuonPlusDefinition();
+    G4MuonMinus::MuonMinusDefinition();
+  }
+  
+  void MuonDecayProcess::ConstructProcess() {
+    // Define muon decay process
+    G4DecayWithSpin* muonDecayProcess = new G4DecayWithSpin();
+    
+    // Add muon decay process to the muon particle definition
+    G4ParticleDefinition* muonPlus = G4MuonPlus::Definition();
+    G4ParticleDefinition* muonMinus = G4MuonMinus::Definition();
+    
+    G4ProcessManager* muonPlusProcessManager = muonPlus->GetProcessManager();
+    G4ProcessManager* muonMinusProcessManager = muonMinus->GetProcessManager();
+    
+    muonPlusProcessManager->AddProcess(muonDecayProcess);
+    muonMinusProcessManager->AddProcess(muonDecayProcess);
+    
+    // Set muon decay process to be applicable everywhere
+    muonPlusProcessManager->SetProcessOrdering(muonDecayProcess, G4ProcessVectorDoItIndex::idxAtRest);
+    muonPlusProcessManager->SetProcessOrdering(muonDecayProcess, G4ProcessVectorDoItIndex::idxAlongStep);
+    muonPlusProcessManager->SetProcessOrdering(muonDecayProcess, G4ProcessVectorDoItIndex::idxPostStep);
+    
+    muonMinusProcessManager->SetProcessOrdering(muonDecayProcess, G4ProcessVectorDoItIndex::idxAtRest);
+    muonMinusProcessManager->SetProcessOrdering(muonDecayProcess, G4ProcessVectorDoItIndex::idxAlongStep);
+    muonMinusProcessManager->SetProcessOrdering(muonDecayProcess, G4ProcessVectorDoItIndex::idxPostStep);
+  }
+
+}

@@ -1,0 +1,16 @@
+#ifndef PHYSICSLIST_HH
+#define PHYSICSLIST_HH
+
+#include "G4VUserPhysicsList.hh"
+
+class PhysicsList : public G4VUserPhysicsList {
+public:
+  PhysicsList();
+  virtual ~PhysicsList();
+
+  // Add or override methods if needed
+  virtual void ConstructParticle();
+  virtual void ConstructProcess();
+};
+
+#endif

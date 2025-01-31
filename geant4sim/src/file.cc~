@@ -1,0 +1,49 @@
+#include <iostream>
+#include <vector>
+
+#include "file.h"
+#include "HelixTrack.h"
+
+HelixTrack track(0., 0., 0.);
+std::vector<HelixTrack> tracks;
+
+
+static void writeToFile(const char* filename, std::vector<HelixTrack>& tracks) {
+  TFile outputFile(filename, "RECREATE");
+  if (!outputFile.IsOpen()) {
+    std::cerr << "Error: Could not open ROOT file for writing: " << filename << std::endl;
+    return;
+  }
+
+  TTree tree("HelixTrackTree", "Tree containing HelixTrack objects");
+
+  // Define TBranches corresponding to each member of the HelixTrack class
+  double trueMomentum;
+  double polarAngle;
+  double azimuthalAngle;
+  TVector3 origin;
+  std::vector<std::vector<double>> hitsCoordinates;
+  std::vector<std::vector<double>> trackCoordinates;
+
+  tree.Branch("trueMomentum", &trueMomentum);
+  tree.Branch("polarAngle", &polarAngle);
+  tree.Branch("azimuthalAngle", &azimuthalAngle);
+  tree.Branch("origin", &origin);
+  tree.Branch("hitsCoordinates", &hitsCoordinates);
+  tree.Branch("trackCoordinates", &trackCoordinates);
+
+  // Fill the TTree with data from each HelixTrack object
+  for (const auto& track : tracks) {
+    trueMomentum = track.trueMomentum;
+    polarAngle = track.polarAngle;
+    azimuthalAngle = track.azimuthalAngle;
+    origin = track.origin;
+    hitsCoordinates = track.hitsCoordinates;
+    trackCoordinates = track.trackCoordinates;
+    tree.Fill();
+  }
+
+  // Write the TTree to the ROOT file and close the file
+  tree.Write();
+  outputFile.Close();
+}
