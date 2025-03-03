@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <numeric>
 
 #include "ConstField.h"
 #include "Exception.h"
@@ -32,6 +33,7 @@
 #include <TCanvas.h>
 #include <TAxis.h>
 #include <TPad.h>
+#include <TStyle.h>
 //#include "TRectangle.h"
 #include <TEfficiency.h>
 #include <TH2F.h>
@@ -46,7 +48,7 @@
 #include "TDatabasePDG.h"
 #include <TMath.h>
 
-#include "NonUniformBField.h"
+//#include "NonUniformBField.h"
 
 // Constants
 const double PI = 3.14159265358979323846;
@@ -204,7 +206,7 @@ void chet_genfit() {
   TChain *tracks = new TChain("HelixTrackTree");
   for (int i=0; i<4; i++) {
     //tracks->Add(Form("chet_sim_z8_with4CylinderEndCaps_%d.root", i));
-    tracks->Add(Form("chet_sim_z20_FullGeo_7Cyl_Nopetals_%d.root", i));
+    tracks->Add(Form("../dataset/chet_sim_z20_FullGeo_7Cyl_Nopetals_%d.root", i));
   }
   std::cout << tracks->GetEntries() << std::endl;
   //TFile *file = TFile::Open(filename);
@@ -258,7 +260,7 @@ void chet_genfit() {
   // init geometry and mag. field
   new TGeoManager("DetectorGeometry", "CHET geometry");
   //TGeoManager::Import("detectorGeometry_with4CylinderEndCaps_design2.root");
-  TGeoManager::Import("detectorGeometry_z20_fullGeo_7Cyl_Nopetals.root");
+  TGeoManager::Import("../geometry/detectorGeometry_z20_fullGeo_7Cyl_Nopetals.root");
   genfit::MaterialEffects::getInstance()->init(new genfit::TGeoMaterialInterface());
   double B = 22.0; // kGaus // 2.2 T
   genfit::FieldManager::getInstance()->init(new genfit::ConstField(0. , 0., B));
@@ -291,6 +293,7 @@ void chet_genfit() {
   int in_acceptance = 0;
   
   for (int iev=0; iev<nEvents; iev++) {
+    std::cout << "\r>>> Processing event number " << iev << std::flush;
 
     tracks->GetEntry(iev);
 
@@ -387,7 +390,7 @@ void chet_genfit() {
 
     
     // true start values
-    TVector3 pos_cm = {origin->X(), origin->Y(), origin->Z()};
+    TVector3 pos_cm = {origin->X()*1E-1, origin->Y()*1E-1, origin->Z()*1E-1};
     TVector3 pos = pos_cm;
     TVector3 mom(1.,0,0);
     mom.SetPhi(polarAngle);
@@ -423,7 +426,7 @@ void chet_genfit() {
     int planeId(0); // detector plane ID
     int hitId(0); // hit ID
 
-    double detectorResolution(0.1); // resolution of planar detectors
+    double detectorResolution(0.05); // resolution of planar detectors // 0.1
     TMatrixDSym hitCov(2);
     hitCov.UnitMatrix();
     hitCov *= detectorResolution*detectorResolution;
