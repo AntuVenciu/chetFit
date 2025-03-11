@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <cmath>
 #include <numeric>
@@ -33,10 +34,10 @@
 #include <TCanvas.h>
 #include <TAxis.h>
 #include <TPad.h>
-#include <TStyle.h>
 //#include "TRectangle.h"
 #include <TEfficiency.h>
 #include <TH2F.h>
+#include <TStyle.h>
 
 #include <EventDisplay.h>
 
@@ -47,11 +48,13 @@
 
 #include "TDatabasePDG.h"
 #include <TMath.h>
-
+using namespace std;
 //#include "NonUniformBField.h"
 
 // Constants
 const double PI = 3.14159265358979323846;
+string outputFolder = "Output_folder";
+string inputFolder = "Input_folder";
 
 TMatrixDSym CovarianceToCylinder(TMatrixDSym cov, TVector3 mom) {
   // Transform a covariance matrix in x,y,z, momx, momy, momz
@@ -88,7 +91,7 @@ TMatrixDSym CovarianceToCylinder(TMatrixDSym cov, TVector3 mom) {
   
 }
 
-std::vector<std::vector<double>> sort_vector_z(std::vector<std::vector<double>> vectors) {
+std::vector<int> sort_vector_z(std::vector<std::vector<double>> vectors) {
   // sort vectors according to z(third) value
 
   std::vector<double> z_of_vectors;
@@ -97,24 +100,30 @@ std::vector<std::vector<double>> sort_vector_z(std::vector<std::vector<double>> 
   }
   
   // initialize original index locations
-  vector<size_t> idx(z_of_vectors.size());
+  vector<int> idx(z_of_vectors.size());
   iota(idx.begin(), idx.end(), 0);
 
-  // sort indexes based on comparing values in v
-  // using std::stable_sort instead of std::sort
-  // to avoid unnecessary index re-orderings
-  // when v contains elements of equal values 
-  std::stable_sort(idx.begin(), idx.end(),
-       [&z_of_vectors](size_t i1, size_t i2) {return z_of_vectors[i1] < z_of_vectors[i2];});
+  // sort indexes based on comparing values in v using std::stable_sort instead of std::sort to avoid unnecessary index re-orderings when v contains elements of equal values. 
+
+  std::stable_sort(idx.begin(), idx.end(), 
+  [&z_of_vectors](size_t i1, size_t i2) {return z_of_vectors[i1] < z_of_vectors[i2];});
+
+  /*if (z_of_vectors[idx[idx.size()-1]] < 0) {
+    std::reverse(idx.begin(), idx.end());
+  }
 
   std::vector<std::vector<double>> copy_vector;
   for (auto i : idx) {
     copy_vector.push_back(vectors.at(i));
   }
-  return copy_vector;
+  
+  return copy_vector; 
+  */
+
+  return idx;
 }
 
-std::vector<int> sort_vector_id(std::vector<std::vector<double>> vectors, std::vector<int> vector_id) {
+/*std::vector<int> sort_vector_id(std::vector<std::vector<double>> vectors, std::vector<int> vector_id) {
   // sort vectors according to z(third) value
 
   std::vector<double> z_of_vectors;
@@ -125,22 +134,22 @@ std::vector<int> sort_vector_id(std::vector<std::vector<double>> vectors, std::v
   // initialize original index locations
   vector<size_t> idx(z_of_vectors.size());
   iota(idx.begin(), idx.end(), 0);
-
-  // sort indexes based on comparing values in v
-  // using std::stable_sort instead of std::sort
-  // to avoid unnecessary index re-orderings
-  // when v contains elements of equal values 
+  
   std::stable_sort(idx.begin(), idx.end(),
        [&z_of_vectors](size_t i1, size_t i2) {return z_of_vectors[i1] < z_of_vectors[i2];});
+
+  if (z_of_vectors[idx[idx.size()-1]] < 0) {
+        std::reverse(idx.begin(), idx.end());
+  }
 
   std::vector<int> copy_vector;
   for (auto i : idx) {
     copy_vector.push_back(vector_id.at(i));
   }
   return copy_vector;
-}
+}*/
 
-// Draw the hits in xy view
+/*// Draw the hits in xy view
 TGraph* drawXYView_hits(std::vector<std::vector<double>> hitsCoordinates, bool eff) {
   int nHits = hitsCoordinates.size();
   double* x = new double[nHits];
@@ -168,7 +177,7 @@ TGraph* drawYZView_hits(std::vector<std::vector<double>> hitsCoordinates, bool e
   for (int i = 0; i < nHits; ++i) {
     y[i] = hitsCoordinates[i].at(1);
     z[i] = hitsCoordinates[i].at(2);
-    }
+  }
   TGraph* gr = new TGraph(nHits, z, y);
   gr->SetMarkerStyle(20);
   if (eff) {
@@ -178,25 +187,25 @@ TGraph* drawYZView_hits(std::vector<std::vector<double>> hitsCoordinates, bool e
     gr->SetLineColor(kRed);
   }
   return gr;
-}
+}*/
 
 TH2F *h_polarAngle_bias = new TH2F("h_polarAngle_bias", ";#phi [rad]; Bias #phi_{true} - #phi_{fit} [rad]", 20, 0., 2 * PI, 50, -0.25, 0.25);
 TH2F *h_polarAngle_std = new TH2F("h_polarAngle_std", ";#phi [rad]; #sigma #phi_{fit} [rad]", 20, 0., 2 * PI, 50, 0., 0.05);
-TH2F *h_azimuthalAngle_bias = new TH2F("h_azimuthalAngle_bias", ";#theta^{geo} [rad]; Bias #theta^{geo}_{true} - #theta^{geo}_{fit} [rad]", 10, 0., PI, 40, - 0.1, 0.1);
-TH2F *h_azimuthalAngle_std = new TH2F("h_azimuthalAngle_std", ";#theta [rad]; #sigma #theta_{fit} [rad]", 20, -PI, PI, 20, 0., 0.1);
-TH2F *h_mom_bias = new TH2F("h_mom_bias", "; Momentum [MeV]; Bias Mom_{true} - Mom_{fit} [MeV]", 10, 0., 68.9, 40, -10, 10);
-TH2F *h_mom_std = new TH2F("h_mom_std", "; Momentum [MeV]; #sigma Mom_{fit} [MeV]", 10, 0., 68.9, 100, 0, 20);
-TH2F *h_XOrbit_bias = new TH2F("h_XOrbit_bias", "; x_{0} (on orbit) [cm]; Bias x_{0, true} - x_{0, fit} [cm]", 60, -3.0, 3-0, 20, -0.5, 0.5);
-TH2F *h_XOrbit_std = new TH2F("h_XOrbit_std", "; x_{0} (on orbit) [cm]; #sigma x_{0, fit} [cm]", 60, -3.0, 3-0, 20, 0., 0.5);
-TH2F *h_YOrbit_bias = new TH2F("h_YOrbit_bias", "; y_{0} (on orbit) [cm]; Bias y_{0, true} - y_{0, fit} [cm]", 60, -3.0, 3-0, 20, -0.5, 0.5);
-TH2F *h_YOrbit_std = new TH2F("h_YOrbit_std", "; y_{0} (on orbit) [cm]; #sigma y_{0, fit} [cm]", 60, -3.0, 3-0, 20, 0., 0.5);
+TH2F *h_azimuthalAngle_bias = new TH2F("h_azimuthalAngle_bias", ";#theta^{geo} [rad]; Bias #theta^{geo}_{true} - #theta^{geo}_{fit} [rad]", 10, 0., PI, 70, - 0.35, 0.35);
+TH2F *h_azimuthalAngle_std = new TH2F("h_azimuthalAngle_std", ";#theta [rad]; #sigma #theta_{fit} [rad]", 20, 0., PI, 35, 0., 0.35);
+TH2F *h_mom_bias = new TH2F("h_mom_bias", "; Momentum [MeV/c]; Bias Mom_{true} - Mom_{fit} [MeV/c]", 20, 0., 68.9, 40, -10, 10);
+TH2F *h_mom_std = new TH2F("h_mom_std", "; Momentum [MeV/c]; #sigma Mom_{fit} [MeV/c]", 20, 0., 68.9, 100, 0, 20);
+TH2F *h_XOrbit_bias = new TH2F("h_XOrbit_bias", "; x_{0} (on orbit) [cm]; Bias x_{0, true} - x_{0, fit} [cm]", 60, -3.0, 3.0, 20, -0.5, 0.5);
+TH2F *h_XOrbit_std = new TH2F("h_XOrbit_std", "; x_{0} (on orbit) [cm]; #sigma x_{0, fit} [cm]", 60, -3.0, 3.0, 20, 0., 0.5);
+TH2F *h_YOrbit_bias = new TH2F("h_YOrbit_bias", "; y_{0} (on orbit) [cm]; Bias y_{0, true} - y_{0, fit} [cm]", 60, -3.0, 3.0, 20, -0.5, 0.5);
+TH2F *h_YOrbit_std = new TH2F("h_YOrbit_std", "; y_{0} (on orbit) [cm]; #sigma y_{0, fit} [cm]", 60, -3.0, 3.0, 20, 0., 0.5);
 
 TCanvas* canvas = new TCanvas("canvas", "Muon Decay Simulation", 1200, 600);
 
-TEfficiency* detector_eff_phi = new TEfficiency("detEffPhi", "Tracking Efficiency; momentum [MeV]; Angle in orbit plane #phi [rad]", 10, 0, 68.9, 10, 0., 2 * PI);
-TEfficiency* detector_eff_theta = new TEfficiency("detEffTheta", "Tracking Efficiency; momentum [MeV]; Emission Angle #theta [rad]", 10, 0, 68.9, 10, 0., PI);
-TEfficiency* detector_acc_phi = new TEfficiency("detAccPhi", "Tracker Acceptance; momentum [MeV]; Angle in orbit plane #phi [rad]", 10, 0, 68.9, 10, 0., 2 * PI);
-TEfficiency* detector_acc_theta = new TEfficiency("detAccTheta", "Tracker Acceptance; momentum [MeV]; Emission Angle #theta [rad]", 10, 0, 68.9, 10, 0., PI);
+TEfficiency* detector_eff_phi = new TEfficiency("detEffPhi", "Tracking Efficiency; momentum [MeV/c]; Angle in orbit plane #phi [rad]", 10, 0, 68.9, 10, 0., 2 * PI);
+TEfficiency* detector_eff_theta = new TEfficiency("detEffTheta", "Tracking Efficiency; momentum [MeV/c]; Emission Angle #theta [rad]", 10, 0, 68.9, 10, 0., PI);
+TEfficiency* detector_acc_phi = new TEfficiency("detAccPhi", "Tracker Acceptance; momentum [MeV/c]; Angle in orbit plane #phi [rad]", 10, 0, 68.9, 10, 0., 2 * PI);
+TEfficiency* detector_acc_theta = new TEfficiency("detAccTheta", "Tracker Acceptance; momentum [MeV/c]; Emission Angle #theta [rad]", 10, 0, 68.9, 10, 0., PI);
 
 void chet_genfit() {
 
@@ -204,9 +213,8 @@ void chet_genfit() {
   
   // Load events
   TChain *tracks = new TChain("HelixTrackTree");
-  for (int i=0; i<4; i++) {
-    //tracks->Add(Form("chet_sim_z8_with4CylinderEndCaps_%d.root", i));
-    tracks->Add(Form("../dataset/chet_sim_z20_FullGeo_7Cyl_Nopetals_%d.root", i));
+  for (int i = 0; i < 2; i++) {
+    tracks->Add(Form("%s/chet_sim_dataset_%d.root", inputFolder.c_str(), i));
   }
   std::cout << tracks->GetEntries() << std::endl;
   //TFile *file = TFile::Open(filename);
@@ -231,13 +239,13 @@ void chet_genfit() {
   TBranch* borigin = 0;
   TBranch* bhits = 0;
   TBranch* btrack = 0;
-  TBranch *bid = 0;
+  TBranch* bid = 0;
 
   tracks->SetBranchAddress("trueMomentum", &trueMomentum, &bmom);
   tracks->SetBranchAddress("polarAngle", &polarAngle, &bpol);
   tracks->SetBranchAddress("azimuthalAngle", &azimuthalAngle, &baz);
   tracks->SetBranchAddress("spinAngle", &spinAngle, &bspin);
-  //tracks->SetBranchAddress("emissionAngle", &emissionAngle, &bemission);
+  //tracks->SetBranchAddress("emissionAngle", &emissionAngle, &bemission); //emissionAngle is assigned below
   tracks->SetBranchAddress("origin", &origin, &borigin);
   tracks->SetBranchAddress("hitsCoordinates", &hitsCoordinates, &bhits);
   tracks->SetBranchAddress("trackCoordinates", &trackCoordinates, &btrack); 
@@ -259,13 +267,14 @@ void chet_genfit() {
   
   // init geometry and mag. field
   new TGeoManager("DetectorGeometry", "CHET geometry");
-  //TGeoManager::Import("detectorGeometry_with4CylinderEndCaps_design2.root");
-  TGeoManager::Import("../geometry/detectorGeometry_z20_fullGeo_7Cyl_Nopetals.root");
+  TGeoManager::Import((inputFolder + "/chet_sim_geometry.gdml").c_str());
   genfit::MaterialEffects::getInstance()->init(new genfit::TGeoMaterialInterface());
   double B = 22.0; // kGaus // 2.2 T
   genfit::FieldManager::getInstance()->init(new genfit::ConstField(0. , 0., B));
+
   //std::shared_ptr<NonUniformBField> bField = std::make_shared<NonUniformBField>("fieldMap.txt");
   //genfit::FieldManager::getInstance()->init(bField.get()); // Non constant field
+
   // particle id in pdg
   const int pdg = -11; // positron
   
@@ -283,45 +292,45 @@ void chet_genfit() {
   genfit::MeasurementProducer<genfit::mySpacepointDetectorHit, genfit::mySpacepointMeasurement> myProducer(&myDetectorHitArray);
   factory.addProducer(myDetId, &myProducer);
   */
-
-  int drawn = 0;
   
   int nEvents = tracks->GetEntriesFast();
   std::cout << nEvents << std::endl;
 
   int fitted = 0;
   int in_acceptance = 0;
-  
-  for (int iev=0; iev<nEvents; iev++) {
-    std::cout << "\r>>> Processing event number " << iev << std::flush;
 
+  int fitted_plus = 0, fitted_minus = 0, acc_plus = 0, acc_minus = 0;
+  
+  for (int iev = 0; iev < nEvents; iev++) {
     tracks->GetEntry(iev);
+    if (iev%1000 == 0) {
+      std::cout << "Event: " << iev << std::endl;
+    }
 
     int nhits = hitsCoordinates->size();
 
-    
-    // Emission angle with respect to z axis: it is pi/2 aligned to it. Goes from -pi -> pi, needs to know if trajectory is in-going or out-going
-    // with respect to muon orbit.
+    // Emission angle with respect to z axis: it is pi/2 aligned to it. Goes from -pi -> pi, needs to know if trajectory is in-going or out-going with respect to muon orbit.
     double decay_angle_orbit_plane = TMath::ATan2(origin->Y(), origin->X());
     double r = TMath::Hypot(origin->X(), origin->Y());
     TVector3 radial_axis = {TMath::Cos(decay_angle_orbit_plane), TMath::Sin(decay_angle_orbit_plane), 0.};
     TVector3 positron_vector = {TMath::Sin(azimuthalAngle)*TMath::Cos(polarAngle), TMath::Sin(azimuthalAngle)*TMath::Sin(polarAngle), TMath::Cos(azimuthalAngle)};
     int is_decay_inner = (TMath::Hypot(origin->X() / r - TMath::Sin(polarAngle), TMath::Cos(polarAngle) + origin->Y() / r) < TMath::Hypot(origin->X() / r - origin->Y() / r, origin->X() / r + origin->Y() / r)) ? 1 : 0;
     emissionAngle = 0;
+
     if (TMath::Cos(azimuthalAngle) >= 0) {
       if (is_decay_inner) {
-	emissionAngle = azimuthalAngle + PI / 2.; 
+	      emissionAngle =   PI / 2. + azimuthalAngle; 
       }
       else {
-	emissionAngle = PI / 2. - azimuthalAngle;
+	      emissionAngle =   PI / 2. - azimuthalAngle;
       }
     }
     else {
       if (is_decay_inner) {
-	emissionAngle = azimuthalAngle - PI / 2.;
+	      emissionAngle = - PI / 2. + azimuthalAngle;
       }
       else {
-	emissionAngle = - (azimuthalAngle + PI / 2.);
+	      emissionAngle = - PI / 2. - azimuthalAngle;
       }
     }
     //std::cout << "Emission Angle = " << emissionAngle << std::endl;
@@ -339,69 +348,51 @@ void chet_genfit() {
       // redefine emissionAngle being taken with respect to spin direction
       detector_acc_theta->Fill(false, trueMomentum, emissionAngle);
       detector_acc_phi->Fill(false, trueMomentum, polarAngle);
-      continue;
+      continue; 
     }
+
     in_acceptance++;
+
+    std::vector<int> index;
+    index = sort_vector_z(*hitsCoordinates); //vector of the indices for which hitsCoordinates elements are in increasing order.
+    int is_forward = 2;
+    //forward condition = comparision between the absolute values of the smallest and the highest z component of histCoordinates (index is already ordered)
+    is_forward = std::abs((hitsCoordinates->at(index[index.size()-1])).at(2)) >= std::abs((hitsCoordinates->at(index[0])).at(2)) ? 1 : 0;
+
+    if (is_forward == 1) {
+      acc_plus++;
+    }
+    else if (is_forward == 0) {
+      acc_minus++;
+    }
+
     detector_acc_theta->Fill(true, trueMomentum, emissionAngle);
     detector_acc_phi->Fill(true, trueMomentum, polarAngle);
     //std::cout << "Track " << iev << " mom = " << trueMomentum << std::endl;
     //std::cout << "Origin at " << origin->X() * 0.1 << " " << origin->Y() * 0.1 << " " << origin->Z() * 0.1 << " with exit angles: phi = " << polarAngle << " and theta = " << azimuthalAngle << std::endl;
-    // Fill efficiency histogram with good events
-    
 
-    // Sort hits
-    
-    *planeID = sort_vector_id(*hitsCoordinates, *planeID);
-    *hitsCoordinates = sort_vector_z(*hitsCoordinates);
-    
-    drawn = 1;
+    // Sort hits by z (done below)
 
-    // Drawing
-    /*
-    // Draw xy view
-    canvas->cd(1);
-    TH2F* h2_xy = new TH2F("h2_xy", "XY View", 100, -10., 10., 100, -10., 10.);
-    h2_xy->SetStats(0);
-    h2_xy->GetXaxis()->SetTitle("X (cm)");
-    h2_xy->GetYaxis()->SetTitle("Y (cm)");
-    h2_xy->Draw("same");
+    /**planeID = sort_vector_id(*hitsCoordinates, *planeID);
+    *hitsCoordinates = sort_vector_z(*hitsCoordinates); 
+
+    if ((hitsCoordinates->at(nhits-1)).at(2) >= 0) { acc_plus++;}
+    else {acc_minus++;}*/
     
-    TGraph* gr_xy = drawXYView_hits(*hitsCoordinates, true);
-    //gr_xy->SetTitle(Form("%d xy", i));
-    gr_xy->Draw("CPsame");
-    
-    canvas->Update();
-    
-    // Draw yz view
-    canvas->cd(2);
-    TH2F* h2_yz = new TH2F("h2_yz", "YZ View", 100, -11., 11., 100, -10., 10.);
-    h2_yz->SetStats(0);
-    h2_yz->GetXaxis()->SetTitle("Z (cm)");
-    h2_yz->GetYaxis()->SetTitle("Y (cm)");
-    h2_yz->Draw("same");
-    
-    
-    TGraph* gr_yz = drawYZView_hits(*hitsCoordinates, true);
-    //gr_yz->SetTitle();
-    gr_yz->Draw("CPsame");
-    canvas->Update();
-    */
     // Fit tracks
-
-    
     // true start values
-    TVector3 pos_cm = {origin->X()*1E-1, origin->Y()*1E-1, origin->Z()*1E-1};
+    TVector3 pos_cm = {origin->X()*0.1, origin->Y()*0.1, origin->Z()*0.1};
     TVector3 pos = pos_cm;
     TVector3 mom(1.,0,0);
     mom.SetPhi(polarAngle);
     mom.SetTheta(azimuthalAngle);
-    mom.SetMag(trueMomentum * 1e-3);
+    mom.SetMag(trueMomentum * 1e-3); //in GeV/c
 
     // Initial covariance
     TMatrixDSym cov(6);
     for (int i=0; i<6; i++) {
       for (int j=0; j<6; j++) {
-	cov(i, j) = 0.1 * 0.1;
+	      cov(i, j) = 0.1 * 0.1;
       }
     }
     
@@ -409,7 +400,6 @@ void chet_genfit() {
     genfit::AbsKalmanFitter* fitter = new genfit::KalmanFitterRefTrack();
   
     // FIT WITH PLANES
-    
     // trackrep
     genfit::AbsTrackRep* rep = new genfit::RKTrackRep(pdg);
     genfit::MeasuredStateOnPlane stateRef(rep);
@@ -426,7 +416,7 @@ void chet_genfit() {
     int planeId(0); // detector plane ID
     int hitId(0); // hit ID
 
-    double detectorResolution(0.05); // resolution of planar detectors // 0.1
+    double detectorResolution(0.1); // resolution of planar detectors
     TMatrixDSym hitCov(2);
     hitCov.UnitMatrix();
     hitCov *= detectorResolution*detectorResolution;
@@ -440,7 +430,21 @@ void chet_genfit() {
     TVector3 previous_hit;
     int cylinderID = 100;
     // Loop over hit
-    for (int i=0; i<nhits; i++) {
+
+    for (int j=0; j<index.size(); j++) {
+      int i = 0;
+      //i = index[j];
+      if (is_forward == 1)
+      { 
+        i = index[j];
+      }
+      else if (is_forward == 0)
+      {
+        i = index[index.size()-1 -j];
+      }
+
+      //std::cout << "#hit: " << i << std::endl;
+
       TVectorD hitCoords(2);
       std::vector<double> AbsCoords = hitsCoordinates->at(i);
       double x_i = AbsCoords.at(0);
@@ -449,35 +453,35 @@ void chet_genfit() {
 
       
       TVector3 this_hit = {x_i, y_i, z_i};
+      //std::cout << "#hit: " << x_i << "," << y_i << "," << z_i << std::endl;
+
       /*
       // Add virtual plane measurements on track when points are very far
-      if (i != 0 &&
-	  (this_hit.Phi() - previous_hit.Phi()) > 0.15)
-	{
-	  TVector3 mid(pos_cm.X(), pos_cm.Y(), (this_hit.Z() + previous_hit.Z())/2.);
-	  TVector3 dir = (mid - previous_hit);
-	  double len = dir.Mag();
-	  dir = dir.Unit();
-	  for (int j=0; j < 1; j++) {
-	    TVectorD virtualhitCoords(3);
-	    virtualhitCoords[0] = mid.X();//previous_hit.X() + dir.X() * (j + 1) * 3.;
-	    virtualhitCoords[1] = mid.Y();//previous_hit.Y() + dir.Y() * (j + 1) * 3.;
-	    virtualhitCoords[2] = mid.Z(); //previous_hit.Z() + dir.Z() * (j + 1) * 3.;
-	    fitTrack.insertMeasurement(new genfit::SpacepointMeasurement(virtualhitCoords, virtualhitCov, 3, (int) (i * 1000 + j), nullptr));
-	  }
-	  
-	  dir = (this_hit - mid);
-	  len = dir.Mag();
-	  dir = dir.Unit();
-	  for (int j=0; j < (int)(len/3) - 1; j++) {
-	    TVectorD virtualhitCoords(3);
-	    virtualhitCoords[0] = mid.X() + dir.X() * (j + 1) * 3.;
-	    virtualhitCoords[1] = mid.Y() + dir.Y() * (j + 1) * 3.;
-	    virtualhitCoords[2] = mid.Z() + dir.Z() * (j + 1) * 3.;
-	    fitTrack.insertMeasurement(new genfit::SpacepointMeasurement(virtualhitCoords, virtualhitCov, 3, (int) (i * 1000 + j), nullptr));
-	  }
-	  
-	}
+      if (i != 0 && (this_hit.Phi() - previous_hit.Phi()) > 0.15)
+      {
+        TVector3 mid(pos_cm.X(), pos_cm.Y(), (this_hit.Z() + previous_hit.Z())/2.);
+        TVector3 dir = (mid - previous_hit);
+        double len = dir.Mag();
+        dir = dir.Unit();
+        for (int j=0; j < 1; j++) {
+          TVectorD virtualhitCoords(3);
+          virtualhitCoords[0] = mid.X(); //previous_hit.X() + dir.X() * (j + 1) * 3.;
+          virtualhitCoords[1] = mid.Y(); //previous_hit.Y() + dir.Y() * (j + 1) * 3.;
+          virtualhitCoords[2] = mid.Z(); //previous_hit.Z() + dir.Z() * (j + 1) * 3.;
+          fitTrack.insertMeasurement(new genfit::SpacepointMeasurement(virtualhitCoords, virtualhitCov, 3, (int) (i * 1000 + j), nullptr));
+        }
+      
+        dir = (this_hit - mid);
+        len = dir.Mag();
+        dir = dir.Unit();
+        for (int j=0; j < (int)(len/3) - 1; j++) {
+          TVectorD virtualhitCoords(3);
+          virtualhitCoords[0] = mid.X() + dir.X() * (j + 1) * 3.;
+          virtualhitCoords[1] = mid.Y() + dir.Y() * (j + 1) * 3.;
+          virtualhitCoords[2] = mid.Z() + dir.Z() * (j + 1) * 3.;
+          fitTrack.insertMeasurement(new genfit::SpacepointMeasurement(virtualhitCoords, virtualhitCov, 3, (int) (i * 1000 + j), nullptr));
+        }
+      }
       
       // update previous hit
       previous_hit = this_hit;
@@ -485,47 +489,50 @@ void chet_genfit() {
 	
       // "Petals" planes
       // (u, v) measurements: u = radius (centered with respect to plane), v = z coordinate
-      /*
-      if (planeID->at(i) < 30) {
-	//std::cout << "Hit on petal " << planeID->at(i) << " at " << x_i << " , " << y_i << " , " << z_i << std::endl;
-	hitCoords[0] = + TMath::Hypot(x_i, y_i) - 3.0 - (8.5 - 4.5)/2 ; // cm
-	hitCoords[1] = z_i; // cm
-	// Plane center and orientation
-	double Phi = TMath::ATan2(y_i, x_i);
-	double X_C = (3.0 + (8.5 - 4.5)/2) * TMath::Cos(Phi);
-	double Y_C = (3.0 + (8.5 - 4.5)/2) * TMath::Sin(Phi); 
-	genfit::PlanarMeasurement* measurement = new genfit::PlanarMeasurement(hitCoords, hitCov, detId, i, nullptr);
-	measurement->setPlane(genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(X_C, Y_C, 0.), TVector3(TMath::Cos(Phi), TMath::Sin(Phi), 0), TVector3(0, 0, 1))), planeID->at(i));
-	fitTrack.insertPoint(new genfit::TrackPoint(measurement, &fitTrack));
+
+      
+      if (planeID->at(i) < 34 && planeID->at(i) > 3) {
+        //std::cout << "Hit on petal " << planeID->at(i) << " at " << x_i << " , " << y_i << " , " << z_i << std::endl;
+        double r_center =  3.1 + (8.5 - 6.5)/2; //cm
+        hitCoords[0] = + TMath::Hypot(x_i, y_i) - r_center ; // cm
+        hitCoords[1] = z_i; // cm
+        // Plane center and orientation
+        double Phi = TMath::ATan2(y_i, x_i);
+        double X_C = r_center * TMath::Cos(Phi);
+        double Y_C = r_center * TMath::Sin(Phi); 
+        genfit::PlanarMeasurement* measurement = new genfit::PlanarMeasurement(hitCoords, hitCov, detId, i, nullptr);
+        measurement->setPlane(genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(X_C, Y_C, 0.), TVector3(TMath::Cos(Phi), TMath::Sin(Phi), 0), TVector3(0, 0, 1))), planeID->at(i));
+        fitTrack.insertPoint(new genfit::TrackPoint(measurement, &fitTrack));
       }
-      */
+      
       
       // End Caps disks
       /*
       else {
-	//std::cout << "Hit on endcap " << planeID->at(i) <<  " at " << x_i << " , " << y_i << " , " << z_i << std::endl;
-	// u, v = x, y
-	hitCoords[0] = x_i;
-	hitCoords[1] = y_i;
-	genfit::PlanarMeasurement* measurement = new genfit::PlanarMeasurement(hitCoords, hitCov, detId, i, nullptr);
-	measurement->setPlane(genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(0., 0., z_i), TVector3(1, 0, 0), TVector3(0, 1, 0))), planeID->at(i));
-	fitTrack.insertPoint(new genfit::TrackPoint(measurement, &fitTrack));
+        //std::cout << "Hit on endcap " << planeID->at(i) <<  " at " << x_i << " , " << y_i << " , " << z_i << std::endl;
+        // u, v = x, y
+        hitCoords[0] = x_i;
+        hitCoords[1] = y_i;
+        genfit::PlanarMeasurement* measurement = new genfit::PlanarMeasurement(hitCoords, hitCov, detId, i, nullptr);
+        measurement->setPlane(genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(0., 0., z_i), TVector3(1, 0, 0), TVector3(0, 1, 0))), planeID->at(i));
+        fitTrack.insertPoint(new genfit::TrackPoint(measurement, &fitTrack));
       }
       */
-      // End cap cylinders
-      if (true) {
-	// Plane center and orientation
-	double Phi = TMath::ATan2(y_i, x_i);
-	double X_C = x_i; // if not smearing is added, the origin of the virtual plane of the cylinder is set at the hit coordinate (fixed R and Phi)
-	double Y_C = y_i;
-	double Z_C = 0. ; // US and DS end cap
-	// u, v = z, rphi is known since it is a cylinder
-	hitCoords[0] = 0.0;
-	hitCoords[1] = z_i - Z_C;
-	 
-	genfit::PlanarMeasurement* measurement = new genfit::PlanarMeasurement(hitCoords, hitCov, detId, i, nullptr);
-	measurement->setPlane(genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(X_C, Y_C, Z_C), TVector3(TMath::Sin(Phi), -TMath::Cos(Phi), 0), TVector3(0, 0, 1))), planeID->at(i));
-	fitTrack.insertPoint(new genfit::TrackPoint(measurement, &fitTrack));
+      // Cylinders
+      if (planeID->at(i) < 4) {
+        // Plane center and orientation
+        //std::cout << "Hit on cylinder " << planeID->at(i) << " at " << x_i << " , " << y_i << " , " << z_i << std::endl;
+        double Phi = TMath::ATan2(y_i, x_i);
+        double X_C = x_i; // if not smearing is added, the origin of the virtual plane of the cylinder is set at the hit coordinate (fixed R and Phi)
+        double Y_C = y_i;
+        double Z_C = 0. ; // US and DS end cap
+        // u, v = z, rphi is known since it is a cylinder
+        hitCoords[0] = 0.0;
+        hitCoords[1] = z_i - Z_C;
+        
+        genfit::PlanarMeasurement* measurement = new genfit::PlanarMeasurement(hitCoords, hitCov, detId, i, nullptr);
+        measurement->setPlane(genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(X_C, Y_C, Z_C), TVector3(TMath::Sin(Phi), -TMath::Cos(Phi), 0), TVector3(0, 0, 1))), planeID->at(i));
+        fitTrack.insertPoint(new genfit::TrackPoint(measurement, &fitTrack));
       }
 
     }
@@ -629,94 +636,96 @@ void chet_genfit() {
     bool is_tracked = false;
     if (fitStatus->isFitConverged() && fitStatus->getNdf() > 0) {
       fitted++;
+      if (is_forward == 1) { fitted_plus++;}
+      else if (is_forward == 0){fitted_minus++;}
       // Fill efficiency histogram
       is_tracked = true;
       detector_eff_theta->Fill(true, trueMomentum, emissionAngle);
       detector_eff_phi->Fill(true, trueMomentum, polarAngle);
       // Project to orbit plane
       try {
-	const genfit::MeasuredStateOnPlane &stFirst = fitTrack.getFittedState();
-	//std::cout << "Fitted mom = " << rep->getMomMag(stFirst) * 1e3 << " Diff = " << rep->getMomMag(stFirst) * 1e3 - trueMomentum << std::endl;
-	TVector3 pos_o;
-	TVector3 mom_o;
-	TMatrixDSym cov_o(6);
-	stFirst.getPosMomCov(pos_o, mom_o, cov_o);
-	genfit::MeasuredStateOnPlane state_orbit(rep);
-	rep->setPosMomCov(state_orbit, pos_o, mom_o, cov_o);
-	rep->extrapolateToPlane(state_orbit, genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(0., 0., 0.), TVector3(1, 0, 0), TVector3(0, 1, 0))));
-	state_orbit.getPosMomCov(pos_o, mom_o, cov_o);
-	// Fill histograms for resolutions etc
-	cov_o = CovarianceToCylinder(cov_o, mom_o);
-	double mom_phi = (mom_o.Phi() > 0 ) ? mom_o.Phi() : mom_o.Phi() + 2. * PI;
-	
-	h_polarAngle_bias->Fill(polarAngle, polarAngle - mom_phi);
-	h_azimuthalAngle_bias->Fill(azimuthalAngle, azimuthalAngle - mom_o.Theta());
-	h_mom_bias->Fill(trueMomentum, trueMomentum - mom_o.Mag() * 1e3);
-	h_XOrbit_bias->Fill(pos_cm.X(), pos_cm.X() - pos_o.X());
-	h_YOrbit_bias->Fill(pos_cm.Y(), pos_cm.Y() - pos_o.Y());
-	h_polarAngle_std->Fill(polarAngle, TMath::Sqrt(cov_o(3, 3)));
-	h_azimuthalAngle_std->Fill(emissionAngle, TMath::Sqrt(cov_o(4, 4)));
-	h_mom_std->Fill(trueMomentum, TMath::Sqrt(state_orbit.getMomVar())*1e3);
-	h_XOrbit_std->Fill(pos_cm.X(), TMath::Sqrt(cov_o(0, 0)));
-	h_YOrbit_std->Fill(pos_cm.Y(), TMath::Sqrt(cov_o(1, 1)));
-	
-	// Fill outTree
-	for (int i=0; i<6; i++) {
-	  parVar[i] = TMath::Sqrt(cov_o(i, i)); 
-	}
+        const genfit::MeasuredStateOnPlane &stFirst = fitTrack.getFittedState();
+        //std::cout << "Fitted mom = " << rep->getMomMag(stFirst) * 1e3 << " Diff = " << rep->getMomMag(stFirst) * 1e3 - trueMomentum << std::endl;
+        TVector3 pos_o;
+        TVector3 mom_o;
+        TMatrixDSym cov_o(6);
+        stFirst.getPosMomCov(pos_o, mom_o, cov_o);
+        genfit::MeasuredStateOnPlane state_orbit(rep);
+        rep->setPosMomCov(state_orbit, pos_o, mom_o, cov_o);
+        rep->extrapolateToPlane(state_orbit, genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(0., 0., 0.), TVector3(1, 0, 0), TVector3(0, 1, 0))));
+        state_orbit.getPosMomCov(pos_o, mom_o, cov_o);
+        // Fill histograms for resolutions etc
+        cov_o = CovarianceToCylinder(cov_o, mom_o);
+        double mom_phi = (mom_o.Phi() > 0 ) ? mom_o.Phi() : mom_o.Phi() + 2. * PI;
+        
+        h_polarAngle_bias->Fill(polarAngle, polarAngle - mom_phi);
+        h_azimuthalAngle_bias->Fill(azimuthalAngle, azimuthalAngle - mom_o.Theta());
+        h_mom_bias->Fill(trueMomentum, trueMomentum - mom_o.Mag() * 1e3);
+        h_XOrbit_bias->Fill(pos_cm.X(), pos_cm.X() - pos_o.X());
+        h_YOrbit_bias->Fill(pos_cm.Y(), pos_cm.Y() - pos_o.Y());
+        h_polarAngle_std->Fill(polarAngle, TMath::Sqrt(cov_o(3, 3)));
+        h_azimuthalAngle_std->Fill(emissionAngle, TMath::Sqrt(cov_o(4, 4)));
+        h_mom_std->Fill(trueMomentum, TMath::Sqrt(state_orbit.getMomVar())*1e3);
+        h_XOrbit_std->Fill(pos_cm.X(), TMath::Sqrt(cov_o(0, 0)));
+        h_YOrbit_std->Fill(pos_cm.Y(), TMath::Sqrt(cov_o(1, 1)));
+        
+        // Fill outTree
+        for (int i=0; i<6; i++) {
+          parVar[i] = TMath::Sqrt(cov_o(i, i)); 
+        }
 
-	// Emission angle between radial and z axis
-	double decay_angle_orbit_plane_fit = TMath::ATan2(pos_o.Y(), pos_o.X()); 
-	TVector3 radial_axis_fit = {TMath::Cos(decay_angle_orbit_plane_fit), TMath::Sin(decay_angle_orbit_plane_fit), 0.};
-	double r_fit = TMath::Hypot(pos_o.X(), pos_o.Y());
-	int is_decay_fit_inner = (TMath::Hypot(pos_o.X() / r_fit - TMath::Sin(mom_o.Phi()), TMath::Cos(mom_o.Phi()) + pos_o.Y() / r_fit) < TMath::Hypot(pos_o.X() / r_fit - pos_o.Y() / r_fit, pos_o.X() / r_fit + pos_o.Y() / r_fit)) ? 1 : 0;
-	TVector3 positron_vector_fit = {TMath::Sin(mom_o.Theta())*TMath::Cos(mom_phi), TMath::Sin(mom_o.Theta())*TMath::Sin(mom_phi), TMath::Cos(mom_o.Theta())};
+        // Emission angle between radial and z axis
+        double decay_angle_orbit_plane_fit = TMath::ATan2(pos_o.Y(), pos_o.X()); 
+        TVector3 radial_axis_fit = {TMath::Cos(decay_angle_orbit_plane_fit), TMath::Sin(decay_angle_orbit_plane_fit), 0.};
+        double r_fit = TMath::Hypot(pos_o.X(), pos_o.Y());
+        int is_decay_fit_inner = (TMath::Hypot(pos_o.X() / r_fit - TMath::Sin(mom_o.Phi()), TMath::Cos(mom_o.Phi()) + pos_o.Y() / r_fit) < TMath::Hypot(pos_o.X() / r_fit - pos_o.Y() / r_fit, pos_o.X() / r_fit + pos_o.Y() / r_fit)) ? 1 : 0;
+        TVector3 positron_vector_fit = {TMath::Sin(mom_o.Theta())*TMath::Cos(mom_phi), TMath::Sin(mom_o.Theta())*TMath::Sin(mom_phi), TMath::Cos(mom_o.Theta())};
 
-	double emissionAngle_fit = 0.;
-	
-	if (TMath::Cos(mom_o.Theta()) >= 0) {
-	  if (is_decay_fit_inner) {
-	    emissionAngle_fit = mom_o.Theta() + PI / 2.; 
-	  }
-	  else {
-	    emissionAngle_fit = PI / 2. - mom_o.Theta();
-	  }
-	}
-	else {
-	  if (is_decay_fit_inner) {
-	    emissionAngle_fit = mom_o.Theta() - PI / 2.;
-	  }
-	  else {
-	    emissionAngle_fit = - (mom_o.Theta() + PI / 2.);
-	  }
-	}
+        double emissionAngle_fit = 0.;
+        
+        if (TMath::Cos(mom_o.Theta()) >= 0) {
+          if (is_decay_fit_inner) {
+            emissionAngle_fit = mom_o.Theta() + PI / 2.; 
+          }
+          else {
+            emissionAngle_fit = PI / 2. - mom_o.Theta();
+          }
+        }
+        else {
+          if (is_decay_fit_inner) {
+            emissionAngle_fit = mom_o.Theta() - PI / 2.;
+          }
+          else {
+            emissionAngle_fit = - (mom_o.Theta() + PI / 2.);
+          }
+        }
 	
 
-	parFit[0] = pos_o.X();
-	parFit[1] = pos_o.Y();
-	parFit[2] = 0.;
-	parFit[3] = mom_o.Mag() * 1e3;
-	parFit[4] = emissionAngle_fit;
-	parFit[5] = mom_phi;
-	parTrue[0] = pos_cm.X();
-	parTrue[1] = pos_cm.Y();
-	parTrue[2] = 0.;
-	parTrue[3] = trueMomentum;
-	parTrue[4] = emissionAngle;
-	parTrue[5] = spinAngle;
-	chisquare = fitStatus->getChi2();
-	ngoodhits = (int)(nhits - fitStatus->getNFailedPoints());
+        parFit[0] = pos_o.X();
+        parFit[1] = pos_o.Y();
+        parFit[2] = 0.;
+        parFit[3] = mom_o.Mag() * 1e3;
+        parFit[4] = emissionAngle_fit;
+        parFit[5] = mom_phi;
+        parTrue[0] = pos_cm.X();
+        parTrue[1] = pos_cm.Y();
+        parTrue[2] = 0.;
+        parTrue[3] = trueMomentum;
+        parTrue[4] = emissionAngle;
+        parTrue[5] = spinAngle;
+        chisquare = fitStatus->getChi2();
+        ngoodhits = (int)(nhits - fitStatus->getNFailedPoints());
 
-	outTree->Fill();
-	
-	//std::cout << "Residual position in orbit plane " << (pos_o - pos_cm).X() << " cm, " << (pos_o - pos_cm).Y() << " cm, " << (pos_o - pos_cm).Z() << " cm " << std::endl;
+        outTree->Fill();
+        
+        //std::cout << "Residual position in orbit plane " << (pos_o - pos_cm).X() << " cm, " << (pos_o - pos_cm).Y() << " cm, " << (pos_o - pos_cm).Z() << " cm " << std::endl;
       }
       catch(genfit::Exception& e){
-	detector_eff_theta->Fill(false, trueMomentum, emissionAngle);
-	detector_eff_phi->Fill(false, trueMomentum, polarAngle);
-	std::cerr << e.what();
-	std::cerr << "Exception, next track" << std::endl;
-	continue;
+        detector_eff_theta->Fill(false, trueMomentum, emissionAngle);
+        detector_eff_phi->Fill(false, trueMomentum, polarAngle);
+        std::cerr << e.what();
+        std::cerr << "Exception, next track" << std::endl;
+        continue;
       }
     }
     else {
@@ -810,14 +819,16 @@ void chet_genfit() {
   
 
   // Fill output file
-  //TFile *outFile = TFile::Open("fittedTracksProperties_500umPrecision.root", "RECREATE");
-  TFile *outFile = TFile::Open("fittedTrackPropertied_z20_fullGeo_7Cyl_Nopetals.root", "RECREATE");
+  TFile *outFile = TFile::Open((outputFolder + "/fittedTrackPropertied.root").c_str(), "RECREATE");
   outTree->Write();
   outFile->Close();
   
   // Draw TEfficiency                                                                       
   
   std::cout << "Efficiency = " << fitted << " / " << in_acceptance << std::endl;
+  std::cout << "Fitted +/- = " << fitted_plus << " / " << fitted_minus << std::endl;
+  std::cout << "Acc +/- = " << acc_plus << " / " << acc_minus << std::endl;
+
   
   TCanvas *cEff = new TCanvas();
   cEff->Divide(2, 2);
@@ -825,21 +836,16 @@ void chet_genfit() {
   gStyle->SetPalette(kTemperatureMap);
   
   TH2 *h_eff_th = detector_eff_theta->CreateHistogram();
-  
-  //h_eff_th->SaveAs("hEfficiencyTheta_3hits_chet_withEndCaps_30planes_500umPrecision.C");
-  h_eff_th->SaveAs("hEfficiencyTheta_3hits_chet_z20_fullGeo_7Cyl_Nopetals.C");
+  h_eff_th->SaveAs((outputFolder + "/hEfficiencyTheta_3hits_chet.C").c_str());
+
   TH2 *h_eff_phi = detector_eff_phi->CreateHistogram();
-  
-  //h_eff_phi->SaveAs("hEfficiencyPhi_3hits_chet_withEndCaps_30planes_500umPrecision.C");
-  h_eff_phi->SaveAs("hEfficiencyPhi_3hits_chet_z20_fullGeo_7Cyl_Nopetals.C");
+  h_eff_phi->SaveAs((outputFolder + "/hEfficiencyPhi_3hits_chet.C").c_str());
+
   TH2 *h_acc_th = detector_acc_theta->CreateHistogram();
-  
-  //h_acc_th->SaveAs("hAcceptanceTheta_3hits_chet_withEndCaps_30planes_500umPrecision.C");
-  h_acc_th->SaveAs("hAcceptanceTheta_3hits_chet_z20_fullGeo_7Cyl_Nopetals.C");
+  h_acc_th->SaveAs((outputFolder + "/hAcceptanceTheta_3hits_chet.C").c_str());
+
   TH2 *h_acc_phi = detector_acc_phi->CreateHistogram();
-  
-  //h_acc_phi->SaveAs("hAcceptancePhi_3hits_chet_withEndCaps_30planes_500umPrecision.C");
-  h_acc_phi->SaveAs("hAcceptancePhi_3hits_chet_z20_fullGeo_7Cyl_Nopetals.C");
+  h_acc_phi->SaveAs((outputFolder + "/hAcceptancePhi_3hits_chet.C").c_str());
 
   cEff->cd(1);
   h_eff_th->Draw("COLZ0");
@@ -862,28 +868,45 @@ void chet_genfit() {
     p->SetMarkerSize(0.7);
     p->SetMarkerColor(kBlack);
     p->SetLineColor(kBlack);
-    h->Draw("colz"); p->Draw("p0same");
-    c->SaveAs(Form("%s_z20_fullGeo_7Cyl_Nopetals.C",h->GetName()));
+    h->Draw("colz"); 
+    p->Draw("p0same");
+    c->SaveAs(Form("%s/%s.C", outputFolder.c_str(), h->GetName()));
   }
+
+  for (auto h : histos) {
+    TCanvas *c = new TCanvas();
+    h->Draw("colz"); 
+    c->SaveAs(Form("%s/%s.png", outputFolder.c_str(), h->GetName()));
+  }
+
+
   
-  TFile *resolution_file = TFile::Open("resolution_file_z20_fullGeo_7Cyl_Nopetals.root", "RECREATE");
+  TFile *resolution_file = TFile::Open((outputFolder + "/resolution_file.root").c_str(), "RECREATE");
 
   for (auto h : histos) {
     h->Write();
   }
   
-  h_polarAngle_bias->Write();
-  h_polarAngle_std->Write();
-  h_azimuthalAngle_bias->Write();
-  h_azimuthalAngle_std->Write();
-  h_mom_bias->Write();
-  h_mom_std->Write();
-  h_XOrbit_bias->Write();
-  h_XOrbit_std->Write();
-  h_YOrbit_bias->Write();
-  h_YOrbit_std->Write();
-
   resolution_file->Close();
-  
-  
+
+  std::ofstream outputFile("FitResults.txt", std::ios::app);
+
+  if (!outputFile) {
+      std::cerr << "Errore nell'apertura del file!" << std::endl;
+      return;
+  }
+
+  outputFile << "------Folder name: " << outputFolder.c_str() << "----------\n";
+  outputFile << "Efficiency = " << fitted << " / " << in_acceptance << "\n";
+  outputFile << "In acceptance +/- = " << acc_plus << " / " << acc_minus << "\n";
+  outputFile << "Fitted +/- = " << fitted_plus << " / " << fitted_minus << "\n";
+  outputFile << "\n" ;
+  outputFile.close(); 
+
+}
+
+int main () 
+{
+  chet_genfit();
+  return 0;
 }
