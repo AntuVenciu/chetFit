@@ -1,5 +1,5 @@
 #ifndef FITTERALGORITHMS_HH
-#define ALGORITHMS_HH
+#define FITTERALGORITHMS_HH
 
 #include <iostream>
 #include <unistd.h>
