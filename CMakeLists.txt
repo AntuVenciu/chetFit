@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
+
 project(myfitter)
 
-# Usa C++17 per garantire compatibilità con ROOT e GenFit
+# Usa C++17 per compatibilità con ROOT e GenFit
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Trova ROOT con i componenti specifici
+# Trova ROOT con i componenti necessari
 find_package(ROOT REQUIRED COMPONENTS Core RIO Hist MathCore Geom)
 include_directories(${ROOT_INCLUDE_DIRS})
 
@@ -21,12 +22,19 @@ else()
     message(FATAL_ERROR "GENFIT environment variable not set. Source your env.sh script.")
 endif()
 
-# Includi le directory di GenFit
+# Includi directory di GenFit
 include_directories(${GENFIT_DIR}/core ${GENFIT_DIR}/include)
 link_directories(${GENFIT_DIR}/lib)
 
-# Aggiungi il file sorgente del tuo eseguibile
-add_executable(myfitter myfitter.cc)
+# Includi la cartella `include/` con gli headers
+include_directories(${PROJECT_SOURCE_DIR}/include)
+
+# Trova tutti i file sorgente e header
+file(GLOB sources ${PROJECT_SOURCE_DIR}/src/*.cc)
+file(GLOB headers ${PROJECT_SOURCE_DIR}/include/*.hh)
+
+# Crea l'eseguibile
+add_executable(myfitter myfitter.cc ${sources} ${headers})
 
 # Linka tutte le librerie di ROOT e libGeom
 target_link_libraries(myfitter 
@@ -35,3 +43,7 @@ target_link_libraries(myfitter
     ${ROOT_LIBRARIES}
     ROOT::Geom
 )
+
+# Aggiungi un target personalizzato (opzionale)
+add_custom_target(MyFitter DEPENDS myfitter)
+
