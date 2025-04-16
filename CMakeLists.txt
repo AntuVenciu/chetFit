@@ -42,6 +42,7 @@ target_link_libraries(myfitter
     Eigen3::Eigen
     ${ROOT_LIBRARIES}
     ROOT::Geom
+    ROOT::Eve
 )
 
 # Aggiungi un target personalizzato (opzionale)

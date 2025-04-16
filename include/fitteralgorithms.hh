@@ -8,9 +8,11 @@
 #include <numeric>
 #include <random>
 
+#include <TROOT.h>
 #include <TRandom.h>
 #include <TMath.h>
 #include <TChain.h>
+#include <TApplication.h>
 #include <TEveManager.h>
 #include <TGeoManager.h>
 #include <TGeoMaterialInterface.h>
@@ -18,10 +20,13 @@
 #include <TDatabasePDG.h>
 #include <TCanvas.h>
 #include <TGraph.h>
+#include <TGraphErrors.h>
 #include <TGraph2D.h>
 #include <TEllipse.h>
 #include <TBox.h>
 #include <TH1I.h>
+#include <TH2D.h>
+#include <TProfile.h>
 #include <TEfficiency.h>
 #include <TMatrixD.h>
 
@@ -59,12 +64,12 @@ namespace FITALG
 
 struct CHeTResolutions
 {
-    CHeTResolutions(Double_t correlationPhiZ) : corrPhiZ(correlationPhiZ) {}
+    CHeTResolutions(Double_t correlationPhiZ, Double_t scaleCovariance = 1.) : corrPhiZ(correlationPhiZ), scaleCov(scaleCovariance) {}
 
-    // Resolutions (cm)
+    // Resolutions [cm]
     Double_t sigmaR = 0.1 / sqrt(12);
-    inline Double_t sigmaPhi(Int_t cylID = 2) const { return 0.1 / Radii[cylID]; };
-    Double_t sigmaZ = 0.15;
+    inline Double_t sigmaPhi(Int_t cylID = 2) const { return (0.1 / Radii[cylID]) / sqrt(12); };
+    Double_t sigmaZ = 0.1 / sqrt(12);
     Double_t covRPhi = 0.;
     Double_t covRZ = 0.;
     inline Double_t covPhiZ(Int_t cylID = 2) const { return corrPhiZ * sigmaPhi(cylID) * sigmaZ; }
@@ -72,8 +77,11 @@ struct CHeTResolutions
     // Correlation
     Double_t corrPhiZ;
 
+    // Fitting tricks
+    Double_t scaleCov;
+
     // Radii and transformation matrix (will be moved in a globals namespace)
-    const Float_t Radii[7] = {2.1, 2.4, 3.7, 4.5, 6.5, 7.5, 8.5};
+    const Float_t Radii[7] = {1.7, 2.1, 3.7, 3.9, 6.55, 7.55, 8.55};
 
     // Matrix
     TMatrixDSym GetMatrixCylindrical(Int_t cylID) const
@@ -91,15 +99,18 @@ struct CHeTResolutions
         C_RphiZ(2,2) = sigmaZ*sigmaZ;
         
         //C_RphiZ.Print();
-        return C_RphiZ;
+        return scaleCov*scaleCov*C_RphiZ;
     };
 
 
     TMatrixDSym GetMatrixCartesian(Int_t cylID, Double_t phi) const
     {
         const Double_t R = Radii[cylID];
-        const TMatrixDSym C_RphiZ = GetMatrixCylindrical(cylID);
-        
+        TMatrixDSym C_xyz = GetMatrixCylindrical(cylID);
+
+        //std::cout << ">>> C_RphiZ = " << std::endl;
+        //C_xyz.Print();
+
         // Define the Jacobian matrix J
         TMatrixD J(3,3);
         
@@ -108,19 +119,9 @@ struct CHeTResolutions
         J(2,0) = 0;          J(2,1) = 0;             J(2,2) = 1;
 
         // Compute transformed covariance: C_xyz = J * C_RphiZ * J^T
-        TMatrixDSym C_xyz(3);
-        TMatrixD temp = J * C_RphiZ;
-        temp = temp * J.T();
+        C_xyz.Similarity(J);
 
-        // Copy the symmetric part into TMatrixDSym
-        for(Int_t i = 0; i < 3; i++)
-        {
-            for(Int_t j = 0; j < 3; j++)
-            { // Fill only lower triangle
-                C_xyz(i,j) = temp(i,j);
-            }
-        }
-
+        //std::cout << ">>> C_xyz = " << std::endl;
         //C_xyz.Print();
         return C_xyz;
     }

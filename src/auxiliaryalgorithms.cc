@@ -69,7 +69,11 @@ pair<vector<vector<Double_t>>, vector<Int_t>> AUXALG::ShuffleVectorZ(vector<vect
 void AUXALG::DrawXYView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas)
 {
     canvas->cd();
-    canvas->DrawFrame(-9, -9, 9, 9);
+    auto frame = canvas->DrawFrame(-9, -9, 9, 9);
+    auto hframe = (TH1F*) gPad->GetPrimitive("hframe");
+    hframe->SetLineWidth(0);
+    frame->Draw();
+    frame->SetTitle("X-Y View;X [cm];Y [cm]");
 
     Int_t nHits = hitsCoordinates.size();
     Double_t* x = new Double_t[nHits];
@@ -90,7 +94,7 @@ void AUXALG::DrawXYView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoor
     ogr->SetMarkerColor(kRed);
 
     TEllipse *ell[7];
-    Float_t R[7] = {8.5, 7.5, 6.5, 4.5, 3.7, 2.4, 2.1};
+    Float_t R[7] = {8.55, 7.55, 6.55, 3.9, 3.7, 2.1, 1.7};
     for(auto i = 0; i < 7; i++)
     {
         ell[i] = new TEllipse(0, 0, R[i]);
@@ -107,7 +111,11 @@ void AUXALG::DrawXYView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoor
 void AUXALG::DrawYZView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas)
 {
     canvas->cd();
-    canvas->DrawFrame(-40, -9, 40, 9);
+    auto frame = canvas->DrawFrame(-40, -9, 40, 9);
+    auto hframe = (TH1F*) gPad->GetPrimitive("hframe");
+    hframe->SetLineWidth(0);
+    frame->Draw();
+    frame->SetTitle("Z-Y View;Z [cm]; Y [cm]");
 
     Int_t nHits = hitsCoordinates.size();
     Double_t* y = new Double_t[nHits];
@@ -129,7 +137,7 @@ void AUXALG::DrawYZView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoor
 
     TBox *box[7];
     Float_t L = 30;
-    Float_t R[7] = {8.5, 7.5, 6.5, 4.5, 3.7, 2.4, 2.1};
+    Float_t R[7] = {8.55, 7.55, 6.55, 3.9, 3.7, 2.1, 1.7};
     for(auto i = 0; i < 7; i++)
     {
         box[i] = new TBox(-L, -R[i], L, R[i]);
@@ -146,24 +154,30 @@ void AUXALG::DrawYZView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoor
 
 
 
-TGraph2D* AUXALG::DrawXYZView_hits(vector<vector<Double_t>> hitsCoordinates)
+void AUXALG::DrawXYZView_hits(vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas)
 {
+    canvas->cd();
+
     Int_t nHits = hitsCoordinates.size();
     Double_t* x = new Double_t[nHits];
     Double_t* y = new Double_t[nHits];
     Double_t* z = new Double_t[nHits];
-    
+
     for(Int_t i = 0; i < nHits; ++i)
     {
         x[i] = hitsCoordinates[i].at(0);
         y[i] = hitsCoordinates[i].at(1);
         z[i] = hitsCoordinates[i].at(2);
     }
-    
+
     TGraph2D *gr = new TGraph2D(nHits, z, x, y);
+    gr->SetTitle("3D View; Z [cm]; X [cm]; Y [cm]");
     gr->SetMarkerStyle(20);
     gr->SetLineColor(kBlue);
-    return gr;
+
+    gr->Draw("P LINE");
+
+    canvas->Update();
 }
 
 
@@ -291,4 +305,143 @@ vector<Int_t> AUXALG::SplitTurns(const vector<vector<Double_t>>& hitsCoordinates
     }
     
     return turnIndices;
+}
+
+
+
+Int_t AUXALG::CountCylinders(const vector<Int_t>& cylinders)
+{
+    set<Int_t> uniqueValues(cylinders.begin(), cylinders.end());
+    return uniqueValues.size();
+}
+
+
+
+TMatrixDSym AUXALG::CovFromCardinalToCylindricalMom(TMatrixDSym cov, TVector3 mom)
+{
+    // Transform a covariance matrix in x,y,z, momx, momy, momz
+    // into a covariance matrix in x, y, z, mom, theta, phi
+    TMatrixDSym covCyl(cov);
+
+    TMatrixD Jac(6, 6);
+    Jac.Zero();
+
+    Double_t p = mom.Mag();
+    Double_t pt = TMath::Hypot(mom.X(), mom.Y());
+
+    if(p == 0 || pt == 0)
+        return covCyl;
+
+    // Calculate Jacobian
+    Jac[0][0] = 1.;
+    Jac[1][1] = 1.;
+    Jac[2][2] = 1.;
+
+    Jac[3][3] = mom.X() / p;
+    Jac[3][4] = mom.Y() / p;
+    Jac[3][5] = mom.Z() / p;
+
+    Jac[4][3] = mom.X() * mom.Z() / p / p / pt;
+    Jac[4][4] = mom.Y() * mom.Z() / p / p / pt;
+    Jac[4][5] = - pt / p / p;
+
+    Jac[5][3] = - mom.Y() / pt / pt;
+    Jac[5][4] = mom.X() / pt / pt;
+    Jac[5][5] = 0.;
+
+    covCyl.Similarity(Jac);
+    return covCyl;
+}
+
+
+
+tuple<vector<Double_t>, vector<Double_t>, vector<Double_t>> AUXALG::GetResults(genfit::Track *fitTrack, genfit::AbsTrackRep *rep, Double_t trueMom, TVector3 truePos, Double_t trueTheta, Double_t truePhi)
+{   
+    try
+    {
+        // Extrapolate to orbit
+        const genfit::MeasuredStateOnPlane &stFirst = fitTrack->getFittedState();
+        TVector3 posProj;
+        TVector3 momProj;
+        TMatrixDSym covProj;
+
+        stFirst.getPosMomCov(posProj, momProj, covProj);
+        genfit::MeasuredStateOnPlane stateOrbit(rep);
+        rep->setPosMomCov(stateOrbit, posProj, momProj, covProj);
+        rep->extrapolateToPlane(stateOrbit, genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(0., 0., 0.), TVector3(1, 0, 0), TVector3(0, 1, 0))));
+        stateOrbit.getPosMomCov(posProj, momProj, covProj);
+        covProj = AUXALG::CovFromCardinalToCylindricalMom(covProj, momProj);
+        
+        // Compute angles
+        Double_t x = posProj.X();
+        Double_t y = posProj.Y();
+        Double_t theta = momProj.Theta();
+        Double_t momProjPhi = (momProj.Phi() > 0 ) ? momProj.Phi() : momProj.Phi() + TMath::TwoPi();
+
+        Double_t pz = TMath::Cos(theta);
+        Double_t pr = TMath::Sin(theta) * (x * TMath::Cos(momProjPhi) + y * TMath::Sin(momProjPhi)) / TMath::Sqrt(x*x + y*y);
+
+        Double_t momProjTheta = TMath::ATan2(pz, pr); // angle in plane (e_r, z) in radiants, in (-pi, pi)
+
+        // Pulls: 
+            // Position
+        Double_t dX = (posProj.X() - truePos.X()) / sqrt(covProj(0,0));
+        Double_t dY = (posProj.Y() - truePos.Y()) / sqrt(covProj(1,1));
+        Double_t dZ = (posProj.Z() - truePos.Z()) / sqrt(covProj(2,2));
+            // Momentum
+        Double_t dMom = (momProj.Mag()*1E3 - trueMom) / (sqrt(covProj(3,3))*1E3);
+        Double_t dTheta = (momProjTheta - trueTheta) / sqrt(covProj(4,4));
+        Double_t dPhi = TMath::ATan2(sin(momProjPhi - truePhi), cos(momProjPhi - truePhi)) / sqrt(covProj(5,5));
+        //Double_t dMom = (momProj.Mag()*1E3 - trueMom);
+        //Double_t dTheta = (momProjTheta - trueTheta);
+        //Double_t dPhi = TMath::ATan2(sin(momProjPhi - truePhi), cos(momProjPhi - truePhi));
+
+        return make_tuple(
+            vector<Double_t>{posProj.X(), posProj.Y(), posProj.Z(), momProj.Mag()*1E3, momProjTheta, momProjPhi},
+            vector<Double_t>{sqrt(covProj(0,0)), sqrt(covProj(1,1)), sqrt(covProj(2,2)), sqrt(covProj(3,3))*1E3, sqrt(covProj(4,4)), sqrt(covProj(5,5))},
+            vector<Double_t>{dX, dY, dZ, dMom, dTheta, dPhi}
+        );
+    }
+    catch(genfit::Exception& e)
+    {
+        cerr << "Exception, next track" << endl;
+        cerr << e.what();
+    }
+
+    return make_tuple(vector<Double_t>(), vector<Double_t>(), vector<Double_t>());
+}
+
+
+
+vector<Double_t> AUXALG::SmearMeasurement(Int_t cylID, vector<Double_t> hitCoords)
+{
+    const Float_t Radii[7] = {1.7, 2.1, 3.7, 3.9, 6.55, 7.55, 8.55};
+
+    if(cylID < 0 || cylID >= 7)
+        throw out_of_range("Invalid cylinder ID");
+
+    Double_t x = hitCoords.at(0);
+    Double_t y = hitCoords.at(1);
+    Double_t z = hitCoords.at(2);
+
+    Double_t r_nominal = Radii[cylID];
+    Double_t phi_nominal = TMath::ATan2(y, x);
+
+    // --- Radial smearing ---
+    Double_t r_min = r_nominal - 0.05;
+    Double_t r_max = r_nominal + 0.05;
+    Double_t r = sqrt(r_min*r_min + (r_max*r_max - r_min*r_min)*gRandom->Rndm());
+
+    // --- Angular smearing ---
+    Double_t dphi = 0.05 / r;
+    Double_t phi = gRandom->Uniform(phi_nominal - dphi, phi_nominal + dphi);
+
+    // --- Longitudinal smearing ---
+    z += gRandom->Uniform(-0.05, 0.05);
+
+    // --- Back to cartesian ---
+    x = r*cos(phi);
+    y = r*sin(phi);
+
+    return {x, y, z};
 }
