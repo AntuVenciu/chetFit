@@ -44,7 +44,3 @@ target_link_libraries(myfitter
     ROOT::Geom
     ROOT::Eve
 )
-
-# Aggiungi un target personalizzato (opzionale)
-add_custom_target(MyFitter DEPENDS myfitter)
-
