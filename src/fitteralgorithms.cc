@@ -1,11 +1,11 @@
 #include "fitteralgorithms.hh"
 
 using namespace std;
+using namespace ROOT;
 // Units are in cm
 
 constexpr Int_t DEBUG_LVL = 0;
-constexpr Double_t CORR_PHIZ = 0.;
-constexpr Double_t SCALE_COV = 1.;
+constexpr Bool_t NORMALIZED_PULLS = true;
 
 
 void FITALG::PlanarFitter(Options opts)
@@ -106,17 +106,17 @@ void FITALG::PlanarFitter(Options opts)
 
         // Sort and if in single event mode draw hits
             // will need a revision when origin point is not in Z = 0 anymore
-        auto sortedHits = AUXALG::SortVectorZ(*hitsCoordinates, *cylinderID);
+        auto sortedHits = PTTALG::SortVectorZ(*hitsCoordinates, *cylinderID);
         *hitsCoordinates = sortedHits.first;
         *cylinderID = sortedHits.second;
-        nTurns = AUXALG::CountTurns(*hitsCoordinates);
+        nTurns = PTTALG::CountTurns(*hitsCoordinates);
 
         if(opts.turnMode)
         {            
             if(!opts.processAll)
                 cout << ">>> nTurns = " << nTurns << endl;
 
-            auto turnHits = AUXALG::SelectTurn(opts.turnID, *hitsCoordinates, *cylinderID);
+            auto turnHits = PTTALG::SelectTurn(opts.turnID, *hitsCoordinates, *cylinderID);
             *hitsCoordinates = turnHits.first;
             *cylinderID = turnHits.second;
 
@@ -154,7 +154,7 @@ void FITALG::PlanarFitter(Options opts)
         if(!opts.processAll)
         {
             cout << Form(">>> Vertex position = (%f, %f, %f) cm", pos[0], pos[1], pos[2]) << endl;
-            cout << Form(">>> Vertex momentum = (%f, %f, %f) MeV", mom[0]*1E3, mom[1]*1E3, mom[2]*1E3) << endl;
+            cout << Form(">>> Vertex momentum = (%f, %f, %f) MeV/c", mom[0]*1E3, mom[1]*1E3, mom[2]*1E3) << endl;
         }
 
         // Track Rep
@@ -194,7 +194,7 @@ void FITALG::PlanarFitter(Options opts)
 	        hitCoords[1] = z_i - Z_C;
 
             genfit::PlanarMeasurement* measurement = new genfit::PlanarMeasurement(hitCoords, hitCov, (*cylinderID)[i], ++hitId, nullptr);
-            measurement->setPlane(genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(X_C, Y_C, Z_C), TVector3(-TMath::Sin(phi), TMath::Cos(phi), 0), TVector3(0, 0, 1))), ++planeId);
+            measurement->setPlane(genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(X_C, Y_C, Z_C), TVector3(-sin(phi), TMath::Cos(phi), 0), TVector3(0, 0, 1))), ++planeId);
 
             fitTrack->insertPoint(new genfit::TrackPoint(measurement, fitTrack));
         }
@@ -287,72 +287,10 @@ void FITALG::PlanarFitter(Options opts)
 void FITALG::SpacepointFitter(Options opts)
 {
     // Load events
-    TChain *tracksChain = new TChain("HelixTrackTree");
-    for(Int_t i=0; i<2; i++)
-        tracksChain->Add(Form("../chet_sim_dataset_%d.root", i));
-    Int_t nEvents = tracksChain->GetEntries(); 
-    cout << "\n>>> There are " << nEvents << " events\n" << endl;
+    TrackDataManager data(opts.eventMax);
 
-    if(opts.eventMax != -1)
-        nEvents = opts.eventMax;
-
-    Double_t trueMomentum;
-    Double_t polarAngle;
-    Double_t azimuthalAngle;
-    Double_t theThetaAngle;
-    Double_t spinAngle;
-    Double_t emissionAngle;
-    TVector3* fOrigin = 0;
-    vector<vector<Double_t>>* hitsCoordinates = 0;
-    vector<vector<Double_t>>* trackCoordinates = 0;
-    vector<Int_t>* cylinderID = 0;
-
-    tracksChain->SetBranchAddress("trueMomentum", &trueMomentum);
-    tracksChain->SetBranchAddress("polarAngle", &azimuthalAngle); // Note that now the convention on polar/azimuth is corrected!     
-    tracksChain->SetBranchAddress("azimuthalAngle", &polarAngle);
-    tracksChain->SetBranchAddress("spinAngle", &spinAngle);
-    tracksChain->SetBranchAddress("origin", &fOrigin);
-    tracksChain->SetBranchAddress("hitsCoordinates", &hitsCoordinates);
-    tracksChain->SetBranchAddress("trackCoordinates", &trackCoordinates);
-    tracksChain->SetBranchAddress("planeID", &cylinderID);
-
-    // Useful objects
-        // Acceptance and efficiency
-    TEfficiency *accPhi = new TEfficiency("accPhi", "Acceptance: Phi vs Momentum; Momentum [MeV/c];#phi [rad]", 10, 0, 68.9, 10, 0., TMath::TwoPi());
-    TEfficiency *accTheta = new TEfficiency("accTheta", "Acceptance: Theta vs Momentum; Momentum [MeV/c]; #theta [rad]", 10, 0, 68.9, 20, -TMath::Pi(), TMath::Pi());
-    TEfficiency *effPhi = new TEfficiency("effPhi", "Efficiency: Phi vs Momentum; Momentum [MeV/c];#phi [rad]", 10, 0, 68.9, 10, 0., TMath::TwoPi());
-    TEfficiency *effTheta = new TEfficiency("effTheta", "Efficiency: Theta vs Momentum; Momentum [MeV/c]; #theta [rad]", 10, 0, 68.9, 20, -TMath::Pi(), TMath::Pi());
-
-        // Turns info
-    TH1I *histTurns = new TH1I("histTurns", "Number of Turns;nTurns;Counts", 20, 0, 20);
-    TEfficiency *effTurns = new TEfficiency("effTurns","nTurns Efficiency;nTurns;Efficiency", 10, 0, 10);
-    TH1I *histCylinders = new TH1I("histCylinders", "Number of Cylinders;nCylinders;Counts", 7, 0, 7);
-    TEfficiency *effCylinders = new TEfficiency("effCylinders","nCylinders Efficiency;nCylinders;Efficiency", 7, 0, 7);
-    TProfile *histCylVMom = new TProfile("histCylVMom", "Number of Cylinders vs Momentum;Momentum [MeV/c];nCylinders", 20, 0, 68.9, 0, 7);
-    TProfile *histTurnsVMom = new TProfile("histTurnsVMom", "Number of Turns vs Momentum;Momentum [MeV/c];nTurns", 20, 0, 68.9, 0, 20);
-
-        // Linearity
-    auto *graphMom = new TH2D("graphMom", "Linearity: Momentum; Momentum_{MC} [MeV/c]; Momentum_{fit} [MeV/c]", 100, 0., 0., 100, 0., 100.);
-    auto *graphTheta = new TH2D("graphTheta", "Linearity: Theta; #theta_{MC} [rad]; #theta_{fit} [rad]", 100, 0., 0., 100, 0., 0.);
-    auto *graphPhi = new TH2D("graphPhi", "Linearity: Phi; #phi_{MC} [rad]; #phi_{fit} [rad]", 100, 0., 0., 100, 0., 0.);
-
-        // Pulls
-    TH1D *histDiffX = new TH1D("histDiffX", "Pull Plot: decay X position;Pulls;Counts", 50, -10, 10);
-    TH1D *histDiffY = new TH1D("histDiffY", "Pull Plot: decay Y position;Pulls;Counts", 50, -10, 10);
-    TH1D *histDiffZ = new TH1D("histDiffZ", "Pull Plot: decay Z position;Pulls;Counts", 50, -10, 10);
-    TH1D *histDiffMom = new TH1D("histDiffMom", "Pull Plot: Momentum;Pulls;Counts", 50, -10, 10);
-    TH1D *histDiffTheta = new TH1D("histDiffTheta", "Pull Plot: #theta;Pulls;Counts", 50, -10, 10);
-    TH1D *histDiffPhi = new TH1D("histDiffPhi", "Pull Plot: #phi;Pulls;Counts", 50, -10, 10);
-
-        // Resolutions
-    TH2D *hist2MomRes = new TH2D("hist2MomRes", "Histo 2D: Momentum resolution;Momentum [MeV/c];#sigma_{p} [MeV/c]",  20, 0., 68.9, 50, 0, 20);
-    TH2D *hist2ThetaRes = new TH2D("hist2ThetaRes", "Histo 2D: Theta resolution;#theta [rad];#sigma_{#theta} [rad]", 40, -TMath::Pi(), TMath::Pi(), 50, 0., 0.5);
-    TH2D *hist2PhiRes = new TH2D("hist2PhiRes", "Histo 2D: Phi resolution;#phi [rad];#sigma_{#phi} [rad]", 20, 0., TMath::TwoPi(), 50, 0., 0.5);
-
-    TProfile *profMomRes = new TProfile("profMomRes", "Profile plot: Momentum resolution;Momentum [MeV/c];#sigma_{p} [MeV/c]", 20, 0., 68.9, 0, 40.);
-    TProfile *profThetaRes = new TProfile("profThetaRes", "Profile plot: Theta resolution;#theta [rad];#sigma_{#theta} [rad]", 40, -TMath::Pi(), TMath::Pi(), 0., 0.5);
-    TProfile *profPhiRes = new TProfile("profPhiRes", "Profile plot: Phi resolution;#phi [rad];#sigma_{#phi} [rad]", 20, 0., TMath::TwoPi(), 0., 0.5);
-
+    Int_t nEvents = data.GetNEvents();
+    Int_t processedEvents = nEvents;
 
     // Init geometry and magnetic field
     new TGeoManager("DetectorGeometry", "CHET geometry");
@@ -367,9 +305,19 @@ void FITALG::SpacepointFitter(Options opts)
     // Init event display
     genfit::EventDisplay* display = genfit::EventDisplay::getInstance();
     display->reset();
+    cout << endl;
 
     // Init fitter (maxIterations, deltaPVal) (Possible values = 20, 1.E-3)
     genfit::AbsKalmanFitter* fitter = new genfit::KalmanFitterRefTrack(20, 1.E-3);
+    //genfit::AbsKalmanFitter* fitter = new genfit::KalmanFitter(20, 1.E-3);
+    
+    //genfit::AbsKalmanFitter* fitter = new genfit::DAF(true);
+
+    // Set the annealing scheme
+    //static_cast<genfit::DAF*>(fitter)->setAnnealingScheme(1000., 1., 10);
+    //static_cast<genfit::DAF*>(fitter)->setConvergenceDeltaWeight(0.00001);
+    //fitter->setMaxIterations(20);
+
     fitter->setDebugLvl(DEBUG_LVL);
 
     // Create array of hits
@@ -383,7 +331,7 @@ void FITALG::SpacepointFitter(Options opts)
 
     // Create Track
     genfit::Track* fitTrack = nullptr;
-    
+
     // Get a specific event for single view mode
     gRandom->SetSeed(0);
     if(opts.event == -1)
@@ -403,8 +351,8 @@ void FITALG::SpacepointFitter(Options opts)
         chetHitArray.Clear();
 
         // Get event
-        tracksChain->GetEntry(ev);
-        Int_t nHits = hitsCoordinates->size();
+        data.GetChain()->GetEntry(ev);
+        Int_t nHits = data.hitsCoordinates->size();
 
         if(!opts.processAll)
         {
@@ -412,13 +360,34 @@ void FITALG::SpacepointFitter(Options opts)
             cout << ">>> NHits = " << nHits << endl;
         }
 
-        // Compute the super emission angle theta for future analysis
-        Double_t x = fOrigin->X()*1E-1;
-        Double_t y = fOrigin->Y()*1E-1;
-        Double_t pz = cos(polarAngle);
-        Double_t pr = sin(polarAngle) * (x * cos(azimuthalAngle) + y * sin(azimuthalAngle)) / sqrt(x*x + y*y);
+        // Get True MC data
+        TVector3 pos = {data.fOrigin->X()*1E-1, data.fOrigin->Y()*1E-1, data.fOrigin->Z()*1E-1};
+        TVector3 mom = {1, 0, 0};
+        mom.SetPhi(data.azimuthalAngle);
+        mom.SetTheta(data.polarAngle);
+        mom.SetMag(data.trueMomentum*1E-3);
 
-        theThetaAngle = TMath::ATan2(pz, pr); // angle in plane (e_r, z) in radiants, in (-pi, pi)
+        // Check momentum: RKTrackRep can handle if > 4 MeV
+        if(mom.Mag()*1E3 < 5)
+        {
+            processedEvents--;
+            continue;
+        }
+
+        // Compute the super emission angle theta for future analysis
+        Double_t x = data.fOrigin->X()*1E-1;
+        Double_t y = data.fOrigin->Y()*1E-1;
+        Double_t pz = cos(data.polarAngle);
+        Double_t pr = sin(data.polarAngle) * (x * cos(data.azimuthalAngle) + y * sin(data.azimuthalAngle)) / sqrt(x*x + y*y);
+
+        Double_t theThetaAngle = TMath::ATan2(pz, pr); // angle in plane (e_r, z) in radiants, in (-pi, pi)
+
+        if(!opts.processAll)
+        {
+            cout << Form(">>> Vertex position = (%f, %f, %f) cm", pos[0], pos[1], pos[2]) << endl;
+            cout << Form(">>> Vertex momentum = (%f, %f, %f) MeV/c", mom[0]*1E3, mom[1]*1E3, mom[2]*1E3) << endl;
+            cout << Form(">>> (p, theta, phi) = (%f MeV/c, %f pi rad, %f pi rad)", mom.Mag()*1E3, theThetaAngle / TMath::Pi(), data.azimuthalAngle / TMath::Pi()) << endl;
+        }
 
         // Check acceptance
         if(nHits < 3)
@@ -426,8 +395,8 @@ void FITALG::SpacepointFitter(Options opts)
             if(!opts.processAll)
                 cout << ">>> Track is not in acceptance!" << endl;
 
-            accTheta->Fill(false, trueMomentum, theThetaAngle);
-            accPhi->Fill(false, trueMomentum, azimuthalAngle);
+            data.accTheta->Fill(false, data.trueMomentum, theThetaAngle);
+            data.accPhi->Fill(false, data.trueMomentum, data.azimuthalAngle);
 
             continue;
         }
@@ -435,25 +404,26 @@ void FITALG::SpacepointFitter(Options opts)
 
         // Sort and if in single event mode draw hits
             // will need a revision when origin point is not in Z = 0 anymore
-        auto sortedHits = AUXALG::SortVectorZ(*hitsCoordinates, *cylinderID);
-        *hitsCoordinates = sortedHits.first;
-        *cylinderID = sortedHits.second;
-        nTurns = AUXALG::CountTurns(*hitsCoordinates);
-        nCylinders = AUXALG::CountCylinders(*cylinderID);
+        auto sortedHits = PTTALG::SortVectorZ(*(data.hitsCoordinates), *(data.cylinderID));
+        *(data.hitsCoordinates) = sortedHits.first;
+        *(data.cylinderID) = sortedHits.second;
+        nTurns = PTTALG::CountTurns(*(data.hitsCoordinates));
+        nCylinders = PTTALG::CountCylinders(*(data.cylinderID));
 
+        // Apply turn analysis
         if(opts.turnMode)
-        {            
+        {
             if(!opts.processAll)
             {
                 cout << ">>> nTurns = " << nTurns << endl;
                 cout << ">>> nCylinders = " << nCylinders << endl;
             }
 
-            auto turnHits = AUXALG::SelectTurn(opts.turnID, *hitsCoordinates, *cylinderID);
-            *hitsCoordinates = turnHits.first;
-            *cylinderID = turnHits.second;
+            auto turnHits = PTTALG::SelectTurn(opts.turnID, *(data.hitsCoordinates), *(data.cylinderID));
+            *(data.hitsCoordinates) = turnHits.first;
+            *(data.cylinderID) = turnHits.second;
 
-            nHits = hitsCoordinates->size();
+            nHits = data.hitsCoordinates->size();
 
             // Check acceptance again
             if(nHits < 3)
@@ -463,99 +433,152 @@ void FITALG::SpacepointFitter(Options opts)
 
                 inAcceptance--;
 
-                accTheta->Fill(false, trueMomentum, theThetaAngle);
-                accPhi->Fill(false, trueMomentum, azimuthalAngle);
+                data.accTheta->Fill(false, data.trueMomentum, theThetaAngle);
+                data.accPhi->Fill(false, data.trueMomentum, data.azimuthalAngle);
 
                 continue;
             }
         }
 
         // Track is in acceptance!
-        accTheta->Fill(true, trueMomentum, theThetaAngle);
-        accPhi->Fill(true, trueMomentum, azimuthalAngle);
+        data.accTheta->Fill(true, data.trueMomentum, theThetaAngle);
+        data.accPhi->Fill(true, data.trueMomentum, data.azimuthalAngle);
 
-        if(!opts.processAll)
+        
+        // Fast detector simulation
+        if(opts.useSmearing)
         {
-            TCanvas *canvHitsXY = new TCanvas("canvHitsXY", "canvHitsXY", 700, 700);
-            TCanvas *canvHitsYZ = new TCanvas("canvHitsYZ", "canvHitsYZ", 900, 500);
-            TCanvas *canvHitsXYZ = new TCanvas("canvHitsXYZ");
-
-            AUXALG::DrawXYView_hits(fOrigin, *hitsCoordinates, canvHitsXY);
-            AUXALG::DrawYZView_hits(fOrigin, *hitsCoordinates, canvHitsYZ);
-            AUXALG::DrawXYZView_hits(*hitsCoordinates, canvHitsXYZ);
+            for(Int_t i = 0; i < nHits; i++)
+                data.hitsCoordinates->at(i) = AUXALG::SmearMeasurement((*(data.cylinderID))[i], data.hitsCoordinates->at(i));
         }
 
-        // Start values for the fit
-        TVector3 pos = {fOrigin->X()*1E-1, fOrigin->Y()*1E-1, fOrigin->Z()*1E-1};
-        TVector3 mom = {1, 0, 0};
-        mom.SetPhi(azimuthalAngle);
-        mom.SetTheta(polarAngle);
-        mom.SetMag(trueMomentum*1E-3);
 
-        if(!opts.processAll)
+        // Prefitter
+        auto helixPars = HelixPrefitter(*(data.hitsCoordinates), *(data.cylinderID), opts);
+        Double_t xC = helixPars[0],
+                 yC = helixPars[1],
+                 R = helixPars[2],
+                 phi0 = helixPars[3],
+                 z0 = helixPars[4],
+                 tanLambda = helixPars[5];
+
+        // Cumulative arc length computation
+        vector<Double_t> s_cumulative;
+        Double_t previous_phi = phi0;
+        Double_t previous_s = 0;
+
+        for(const auto& point : *(data.hitsCoordinates))
         {
-            cout << Form(">>> Vertex position = (%f, %f, %f) cm", pos[0], pos[1], pos[2]) << endl;
-            cout << Form(">>> Vertex momentum = (%f, %f, %f) MeV", mom[0]*1E3, mom[1]*1E3, mom[2]*1E3) << endl;
-            cout << Form(">>> Angles (theta, phi) = (%f pi, %f pi) rad", theThetaAngle / TMath::Pi(), azimuthalAngle / TMath::Pi()) << endl;
+            Double_t dx = point[0] - xC;
+            Double_t dy = point[1] - yC;
+            Double_t phi = atan2(dy, dx);
+            Double_t dphi = phi - previous_phi;
+            if(dphi > M_PI) dphi -= 2 * M_PI;
+            if(dphi < -M_PI) dphi += 2 * M_PI;
+            dphi *= -1;
+            Double_t s = previous_s + R * dphi;
+            s_cumulative.push_back(s);
+            previous_phi = phi;
+            previous_s = s;
         }
 
         // Track candidate
         genfit::TrackCand trackCand;
 
         // Resolution of detectors
-        const Double_t detectorResolution = 0.1;
-        const CHeTResolutions hitCov(CORR_PHIZ, SCALE_COV);
-    
-        //TMatrixDSym hitCov(3);
-        //hitCov.UnitMatrix();
-        //hitCov *= detectorResolution*detectorResolution;
-
+        const CHeT::Resolutions hitCov;
+        
         // Fill the candidate
+        vector<TVector3> measuredCoordinates;
+        Int_t hitID = 0;
+        Int_t nAddedHits = 0;
         for(Int_t i = 0; i < nHits; i++)
-        {
+        {   
             TVector3 hitCoords;
+            vector<Double_t> measuredCoords = data.hitsCoordinates->at(i);
 
-            vector<Double_t> AbsCoords = hitsCoordinates->at(i);
-            //vector<Double_t> measuredCoords = AUXALG::SmearMeasurement((*cylinderID)[i], hitsCoordinates->at(i));
+            hitCoords[0] = measuredCoords.at(0);
+            hitCoords[1] = measuredCoords.at(1);
+            hitCoords[2] = measuredCoords.at(2);
+
+            measuredCoordinates.push_back(hitCoords);
+
+            new(chetHitArray[hitID]) genfit::mySpacepointDetectorHit(
+                hitCoords,
+                hitCov.GetMatrixCartesian((*(data.cylinderID))[i], TMath::ATan2(hitCoords[1], hitCoords[0]))
+            );
             
-            hitCoords[0] = AbsCoords.at(0);
-            hitCoords[1] = AbsCoords.at(1);
-            hitCoords[2] = AbsCoords.at(2);
+            trackCand.addHit(detId, hitID, -1, i);
+            hitID++;
 
-            // Smearing?
-            //hitCoords[0] = measuredCoords.at(0);
-            //hitCoords[1] = measuredCoords.at(1);
-            //hitCoords[2] = measuredCoords.at(2);
+            if(((i + 1) < nHits) && ((s_cumulative[i+1] - s_cumulative[i])/ R > TMath::Pi()/4))
+            {
+                const Double_t s_middle = 0.5 * (s_cumulative[i] + s_cumulative[i + 1]);
+                AUXALG::AddFakeHitFromHelix(trackCand, hitID, i + 0.5,
+                                            s_middle, xC, yC, R, z0, phi0, tanLambda,
+                                            chetHitArray, 1.);
+                nAddedHits++;
+                hitID++;
+            }
+        }
+        
+        // Plotting
+        if(!opts.processAll)
+        {
+            vector<vector<Double_t>> plottedCoordsVec;
+            for(const auto& vec : measuredCoordinates)
+                plottedCoordsVec.push_back({vec.X(), vec.Y(), vec.Z()});
 
-            new(chetHitArray[i]) genfit::mySpacepointDetectorHit(hitCoords, hitCov.GetMatrixCartesian((*cylinderID)[i], TMath::ATan2(hitCoords[1], hitCoords[0])));
-            //new(chetHitArray[i]) genfit::mySpacepointDetectorHit(hitCoords, hitCov);
-            trackCand.addHit(detId, i);
+            TCanvas *canvHitsXY = new TCanvas("canvHitsXY", "canvHitsXY", 700, 700);
+            TCanvas *canvHitsYZ = new TCanvas("canvHitsYZ", "canvHitsYZ", 900, 500);
+            TCanvas *canvHitsXYZ = new TCanvas("canvHitsXYZ");
+
+            AUXALG::DrawXYView_hits(data.fOrigin, plottedCoordsVec, canvHitsXY);
+            AUXALG::DrawYZView_hits(data.fOrigin, plottedCoordsVec, canvHitsYZ);
+            AUXALG::DrawXYZView_hits(plottedCoordsVec, canvHitsXYZ);
         }
 
+
+        // Start values for fit (would come from pattern recognition)
         // Initial guess for cov
+        const Double_t seedResolution = 0.1; // ?
         TMatrixDSym covSeed(6);
         for(Int_t i = 0; i < 3; i++)
-            covSeed(i,i) = detectorResolution*detectorResolution;
+            covSeed(i,i) = seedResolution*seedResolution;
         for(Int_t i = 3; i < 6; i++)
-            covSeed(i,i) = pow(detectorResolution / nHits / sqrt(3), 2);
+            covSeed(i,i) = pow(seedResolution / nHits / sqrt(3), 2);
 
         // Set start values
-        trackCand.setPosMomSeedAndPdgCode(pos, mom, pdg);
+        TVector3 posSeed(pos);
+        TVector3 momSeed(mom);
+        if(opts.pttrecMode)
+            tie(posSeed, momSeed) = PTTALG::SmearSeed(pos, mom);
+
+        if(!opts.processAll)
+        {
+            cout << endl;
+            cout << Form(">>> Seed position = (%f, %f, %f) cm", posSeed[0], posSeed[1], posSeed[2]) << endl;
+            cout << Form(">>> Seed momentum = (%f, %f, %f) MeV", momSeed[0]*1E3, momSeed[1]*1E3, momSeed[2]*1E3) << endl;
+        }
+        
+        trackCand.setPosMomSeedAndPdgCode(posSeed, momSeed, pdg);
         trackCand.setCovSeed(covSeed);
+
 
         // Track rep
         genfit::AbsTrackRep *rep = new genfit::RKTrackRep(pdg);
 
         // Create track
         fitTrack = new genfit::Track(trackCand, chetFactory, rep);
-    
+
         // Check
         fitTrack->checkConsistency();
+        //fitTrack->Print();
 
         // Do the fit
         try
         {
-            fitter->processTrack(fitTrack);
+            fitter->processTrack(fitTrack, true);
         }
         catch(genfit::Exception& e)
         {
@@ -572,30 +595,29 @@ void FITALG::SpacepointFitter(Options opts)
         {
             inEfficiency++;
             
-            TVector3 truePos = (*fOrigin) * 1E-1; // cm
-            auto [fRes, fSigma, fPulls] = AUXALG::GetResults(fitTrack, rep, trueMomentum, truePos, theThetaAngle, azimuthalAngle);
+            auto [fRes, fSigma, fPulls] = AUXALG::GetResults(fitTrack, rep, (*data.fOrigin)*1E-1, data.trueMomentum, theThetaAngle, data.azimuthalAngle, NORMALIZED_PULLS);
             if(fRes.size() == 0) continue;
-            histDiffX->Fill(fPulls[0]);
-            histDiffY->Fill(fPulls[1]);
-            histDiffZ->Fill(fPulls[2]);
-            histDiffMom->Fill(fPulls[3]);
-            histDiffTheta->Fill(fPulls[4]);
-            histDiffPhi->Fill(fPulls[5]);
+            data.histDiffX->Fill(fPulls[0]);
+            data.histDiffY->Fill(fPulls[1]);
+            data.histDiffZ->Fill(fPulls[2]);
+            data.histDiffMom->Fill(fPulls[3]);
+            data.histDiffTheta->Fill(fPulls[4]);
+            data.histDiffPhi->Fill(fPulls[5]);
 
-            graphMom->Fill(trueMomentum, fRes[3]);
-            graphTheta->Fill(theThetaAngle, fRes[4]);
-            graphPhi->Fill(azimuthalAngle, fRes[5]);
+            data.graphMom->Fill(data.trueMomentum, fRes[3]);
+            data.graphTheta->Fill(theThetaAngle, fRes[4]);
+            data.graphPhi->Fill(data.azimuthalAngle, fRes[5]);
 
-            hist2MomRes->Fill(trueMomentum, fSigma[3]);
-            hist2ThetaRes->Fill(theThetaAngle, fSigma[4]);
-            hist2PhiRes->Fill(azimuthalAngle, fSigma[5]);
+            data.hist2MomRes->Fill(data.trueMomentum, fSigma[3]);
+            data.hist2ThetaRes->Fill(theThetaAngle, fSigma[4]);
+            data.hist2PhiRes->Fill(data.azimuthalAngle, fSigma[5]);
 
-            profMomRes->Fill(trueMomentum, fSigma[3]);
-            profThetaRes->Fill(theThetaAngle, fSigma[4]);
-            profPhiRes->Fill(azimuthalAngle, fSigma[5]);
+            data.profMomRes->Fill(data.trueMomentum, fSigma[3]);
+            data.profThetaRes->Fill(theThetaAngle, fSigma[4]);
+            data.profPhiRes->Fill(data.azimuthalAngle, fSigma[5]);
 
             if(!opts.processAll)
-                cout << Form(">>> Fitted angles (theta, phi) = (%f pi, %f pi) rad", fRes[4] / TMath::Pi(), fRes[5] / TMath::Pi()) << endl;
+                cout << Form(">>> Fitted (p, theta, phi) = (%f MeV/c, %f pi rad, %f pi rad)", mom.Mag()*1E3, fRes[4] / TMath::Pi(), fRes[5] / TMath::Pi()) << endl;
         }
 
 
@@ -605,16 +627,16 @@ void FITALG::SpacepointFitter(Options opts)
         }
 
         // Track is in efficiency?
-        effTheta->Fill(isFitConverged, trueMomentum, theThetaAngle);
-        effPhi->Fill(isFitConverged, trueMomentum, azimuthalAngle);
+        data.effTheta->Fill(isFitConverged, data.trueMomentum, theThetaAngle);
+        data.effPhi->Fill(isFitConverged, data.trueMomentum, data.azimuthalAngle);
 
         // Store turns and cylinders data
-        histTurns->Fill(nTurns);
-        effTurns->Fill(isFitConverged, nTurns);
-        histCylinders->Fill(nCylinders);
-        effCylinders->Fill(isFitConverged, nCylinders);
-        histTurnsVMom->Fill(trueMomentum, nTurns);
-        histCylVMom->Fill(trueMomentum, nCylinders);
+        data.histTurns->Fill(nTurns);
+        data.effTurns->Fill(isFitConverged, nTurns);
+        data.histCylinders->Fill(nCylinders);
+        data.effCylinders->Fill(isFitConverged, nCylinders);
+        data.histTurnsVMom->Fill(data.trueMomentum, nTurns);
+        data.histCylVMom->Fill(data.trueMomentum, nCylinders);
 
         // Check
         fitTrack->checkConsistency();
@@ -631,101 +653,101 @@ void FITALG::SpacepointFitter(Options opts)
     {
         // Recap
         cout << "\n---------------------------------------------------------" << endl;
-        cout << ">>> Acceptance = " << (Float_t) (inAcceptance * 100) / nEvents << endl;
+        cout << ">>> Acceptance = " << (Float_t) (inAcceptance * 100) / processedEvents << endl;
         cout << ">>> Efficiency = " << (Float_t) (inEfficiency * 100) / inAcceptance << endl;
         cout << "---------------------------------------------------------\n" << endl;
 
         // Graphs
-        if(opts.saveMode)
+        if(opts.quietMode)
             gROOT->SetBatch(true);
 
         TCanvas *canvEfficiency = new TCanvas("canvEfficiency");
         canvEfficiency->Divide(2,2);
         canvEfficiency->cd(1);
-        accTheta->Draw();
+        data.accTheta->Draw("COLZ TEXT");
         canvEfficiency->cd(2);
-        accPhi->Draw();
+        data.accPhi->Draw("COLZ TEXT");
         canvEfficiency->cd(3);
-        effTheta->Draw();
+        data.effTheta->Draw("COLZ TEXT");
         canvEfficiency->cd(4);
-        effPhi->Draw();
+        data.effPhi->Draw("COLZ TEXT");
     
         TCanvas *canvTurns = new TCanvas("canvTurns");
         canvTurns->Divide(2);
         canvTurns->cd(1);
-        histTurns->Draw();
+        data.histTurns->Draw();
         canvTurns->cd(2);
-        effTurns->Draw("AP");
+        data.effTurns->Draw("AP");
 
         TCanvas *canvCylinders = new TCanvas("canvCylinders");
         canvCylinders->Divide(2, 2);
         canvCylinders->cd(1);
-        histCylinders->Draw();
+        data.histCylinders->Draw();
         canvCylinders->cd(2);
-        effCylinders->Draw("AP");
+        data.effCylinders->Draw("AP");
         canvCylinders->cd(3);
-        histTurnsVMom->Draw();
+        data.histTurnsVMom->Draw();
         canvCylinders->cd(4);
-        histCylVMom->Draw();
+        data.histCylVMom->Draw();
         
         TCanvas *canvLinearity = new TCanvas("canvLinearity");
         canvLinearity->Divide(3);
         canvLinearity->cd(1);
-        graphMom->SetMarkerStyle(20);
-        graphMom->Draw("SCAT");
+        data.graphMom->SetMarkerStyle(20);
+        data.graphMom->Draw("SCAT");
         canvLinearity->cd(2);
-        graphTheta->SetMarkerStyle(20);
-        graphTheta->Draw("SCAT");
+        data.graphTheta->SetMarkerStyle(20);
+        data.graphTheta->Draw("SCAT");
         canvLinearity->cd(3);
-        graphPhi->SetMarkerStyle(20);
-        graphPhi->Draw("SCAT");
+        data.graphPhi->SetMarkerStyle(20);
+        data.graphPhi->Draw("SCAT");
 
         TCanvas *canvfPullsPos = new TCanvas("Pulls Position");
         canvfPullsPos->Divide(3);
         
         canvfPullsPos->cd(1);
-        histDiffX->Draw();
+        data.histDiffX->Draw();
         
         canvfPullsPos->cd(2);
-        histDiffY->Draw();
+        data.histDiffY->Draw();
         
         canvfPullsPos->cd(3);
-        histDiffZ->Draw();
+        data.histDiffZ->Draw();
         
         TCanvas *canvfPullsMom = new TCanvas("Pulls Momentum");   
         canvfPullsMom->Divide(3);
         
         canvfPullsMom->cd(1);
-        histDiffMom->Draw();
+        data.histDiffMom->Draw();
 
         canvfPullsMom->cd(2);
-        histDiffTheta->Draw();
+        data.histDiffTheta->Draw();
 
         canvfPullsMom->cd(3);
-        histDiffPhi->Draw();
+        data.histDiffPhi->Draw();
 
         TCanvas *canvProfRes = new TCanvas("ProfResolutions");
         canvProfRes->Divide(3);
         canvProfRes->cd(1);
-        profMomRes->Draw();
+        data.profMomRes->Draw();
         canvProfRes->cd(2);
-        profThetaRes->Draw();
+        data.profThetaRes->Draw();
         canvProfRes->cd(3);
-        profPhiRes->Draw();
+        data.profPhiRes->Draw();
     
         TCanvas *canvResMom = new TCanvas("canvResMom");
         canvResMom->cd();
-        hist2MomRes->Draw();
+        data.hist2MomRes->Draw();
 
         TCanvas *canvResTheta = new TCanvas("canvResTheta");
         canvResTheta->cd();
-        hist2ThetaRes->Draw();
+        data.hist2ThetaRes->Draw();
 
         TCanvas *canvResPhi = new TCanvas("canvResPhi");
         canvResPhi->cd();
-        hist2PhiRes->Draw();
+        data.hist2PhiRes->Draw();
 
-        if(opts.saveMode)
+        if(opts.quietMode)
         {
             canvEfficiency->SaveAs("canvEfficiency.pdf");
             canvResMom->SaveAs("canvResMom.pdf");
@@ -744,3 +766,1324 @@ void FITALG::SpacepointFitter(Options opts)
     // Finally
     exit(0);
 }
+
+
+
+void FITALG::HelixFitter(Options opts)
+{
+    // Load events
+    TrackDataManager data(opts.eventMax);
+
+    Int_t nEvents = data.GetNEvents();
+
+    genfit::EventDisplay* display = genfit::EventDisplay::getInstance();
+
+    // Get a specific event for single view mode
+    gRandom->SetSeed(0);
+    if(opts.event == -1)
+        opts.event = gRandom->Integer(nEvents);
+
+    // Event loop
+    Int_t inAcceptance = 0; Int_t inEfficiency = 0;
+    Int_t nTurns, nCylinders;
+    for(Int_t ev = 0; ev < nEvents; ev++)
+    {
+        if(!opts.processAll)
+            if(ev != opts.event)
+                continue;
+
+        // Get event
+        data.GetChain()->GetEntry(ev);
+        Int_t nHits = data.hitsCoordinates->size();
+
+        if(!opts.processAll)
+        {
+            cout << "\n>>> Event number = " << ev << endl;
+            cout << ">>> NHits = " << nHits << endl;
+        }
+
+        // Get True MC data
+        TVector3 pos = {data.fOrigin->X()*1E-1, data.fOrigin->Y()*1E-1, data.fOrigin->Z()*1E-1};
+        TVector3 mom = {1, 0, 0};
+        mom.SetPhi(data.azimuthalAngle);
+        mom.SetTheta(data.polarAngle);
+        mom.SetMag(data.trueMomentum*1E-3);
+
+        // Compute the super emission angle theta for future analysis
+        Double_t x = data.fOrigin->X()*1E-1;
+        Double_t y = data.fOrigin->Y()*1E-1;
+        Double_t pz = cos(data.polarAngle);
+        Double_t pr = sin(data.polarAngle) * (x * cos(data.azimuthalAngle) + y * sin(data.azimuthalAngle)) / sqrt(x*x + y*y);
+
+        Double_t theThetaAngle = TMath::ATan2(pz, pr); // angle in plane (e_r, z) in radiants, in (-pi, pi)
+
+        if(!opts.processAll)
+        {
+            cout << Form(">>> Vertex position = (%f, %f, %f) cm", pos[0], pos[1], pos[2]) << endl;
+            cout << Form(">>> Vertex momentum = (%f, %f, %f) MeV/c", mom[0]*1E3, mom[1]*1E3, mom[2]*1E3) << endl;
+            cout << Form(">>> (p, theta, phi) = (%f MeV/c, %f pi rad, %f pi rad)", mom.Mag()*1E3, theThetaAngle / TMath::Pi(), data.azimuthalAngle / TMath::Pi()) << endl;
+        }
+
+        // Check acceptance
+        if(nHits < 3)
+        {
+            if(!opts.processAll)
+                cout << ">>> Track is not in acceptance!" << endl;
+
+            data.accTheta->Fill(false, data.trueMomentum, theThetaAngle);
+            data.accPhi->Fill(false, data.trueMomentum, data.azimuthalAngle);
+
+            continue;
+        }
+        inAcceptance++;
+
+        // Sort and if in single event mode draw hits
+            // will need a revision when origin point is not in Z = 0 anymore
+        auto sortedHits = PTTALG::SortVectorZ(*(data.hitsCoordinates), *(data.cylinderID));
+        *(data.hitsCoordinates) = sortedHits.first;
+        *(data.cylinderID) = sortedHits.second;
+        nTurns = PTTALG::CountTurns(*(data.hitsCoordinates));
+        nCylinders = PTTALG::CountCylinders(*(data.cylinderID));
+
+        // Apply turn analysis
+        if(opts.turnMode)
+        {
+            if(!opts.processAll)
+            {
+                cout << ">>> nTurns = " << nTurns << endl;
+                cout << ">>> nCylinders = " << nCylinders << endl;
+            }
+
+            auto turnHits = PTTALG::SelectTurn(opts.turnID, *(data.hitsCoordinates), *(data.cylinderID));
+            *(data.hitsCoordinates) = turnHits.first;
+            *(data.cylinderID) = turnHits.second;
+
+            nHits = data.hitsCoordinates->size();
+
+            // Check acceptance again
+            if(nHits < 3)
+            {
+                if(!opts.processAll)
+                    cout << ">>> Track is not in acceptance anymore!" << endl;
+
+                inAcceptance--;
+
+                data.accTheta->Fill(false, data.trueMomentum, theThetaAngle);
+                data.accPhi->Fill(false, data.trueMomentum, data.azimuthalAngle);
+
+                continue;
+            }
+        }
+
+        // Track is in acceptance!
+        data.accTheta->Fill(true, data.trueMomentum, theThetaAngle);
+        data.accPhi->Fill(true, data.trueMomentum, data.azimuthalAngle);
+
+
+        // Resolution of detectors
+        const CHeT::Resolutions hitCov;
+
+        // Fill the candidate
+        vector<TVector3> measuredCoordinates;
+
+        RVecD r_1, r_2;
+        RVecD w;
+        RVec<RVecD> V(2*nHits, RVecD(2*nHits));
+        
+        for(Int_t i = 0; i < nHits; i++)
+        {
+            TVector3 hitCoords;
+
+            // Measurements
+            vector<Double_t> measuredCoords;
+            if(opts.useSmearing)
+                measuredCoords = AUXALG::SmearMeasurement((*(data.cylinderID))[i], data.hitsCoordinates->at(i));
+            else
+                measuredCoords = data.hitsCoordinates->at(i);
+
+            hitCoords[0] = measuredCoords.at(0);
+            hitCoords[1] = measuredCoords.at(1);
+            hitCoords[2] = measuredCoords.at(2);
+
+            measuredCoordinates.push_back(hitCoords);
+
+            Double_t uu = measuredCoords.at(0);
+            Double_t vv =  measuredCoords.at(1);
+            Double_t phi_global = atan2(vv, uu);
+
+            TMatrixDSym cov_xy = hitCov.GetMatrixCartesian((*(data.cylinderID))[i], phi_global).GetSub(0,1,0,1);
+            
+            TMatrixDSym cov_rphiz = hitCov.GetMatrixCylindrical((*(data.cylinderID))[i]); 
+            
+            // Fill m, V and w
+            r_1.push_back(uu);
+            r_2.push_back(vv);
+            w.push_back(1./cov_rphiz(1,1));
+
+            for(auto j = 0; j < 2; j++)
+                for(auto k = 0; k < 2; k++)
+                    V[nHits*j + i][nHits*k + i] = cov_xy(j,k);
+        }
+        
+        // ... Centering ...
+        //u -= Mean(u);
+        //v -= Mean(v);
+        RVecD m_c = Concatenate(r_1,r_2);
+        
+        // ... Scaling ...
+        //Double_t b = 0.5;
+        //auto q = Dot(m_c, m_c);
+        //auto Q = sqrt(q/nHits);
+        //auto m_cs = m_c * b/Q;
+        
+        TMatrixD V_11(nHits, nHits),
+                 V_12(nHits, nHits),
+                 V_21(nHits, nHits),
+                 V_22(nHits, nHits);
+        
+        for(auto i = 0; i < nHits; i++)
+            for(auto j = 0; j < nHits; j++)
+            {
+                V_11(i,j) = V[i][j];
+                V_12(i,j) = V[i][nHits + j];
+                V_21(i,j) = V[nHits + i][j];
+                V_22(i,j) = V[nHits + i][nHits + j];
+            }
+        
+        // ... Mapping ...
+        RVecD r_3 = r_1*r_1 + r_2*r_2;
+        
+        RVecD r = Concatenate(m_c, r_3);
+        
+        // C Matrix
+        map<pair<Int_t,Int_t>, TMatrixD> C;
+        for(auto i = 1; i <= 3; ++i)
+            for(auto j = 1; j <= 3; ++j)
+                C.insert({{i, j}, TMatrixD(nHits, nHits)});
+        
+        C[{1,1}] = V_11;
+        C[{1,2}] = V_12;
+        C[{2,1}] = V_21;
+        C[{2,2}] = V_22;
+        
+        // C_13, C_23
+        TMatrixD C13(nHits, nHits), C23(nHits, nHits);
+        for(auto i = 0; i < nHits; ++i)
+            for(auto j = 0; j < nHits; ++j)
+            {
+                C13(i,j) = 2*V_11(i,j)*r_1[j] + 2*V_12(i,j)*r_2[j];
+                C23(i,j) = 2*V_21(i,j)*r_1[j] + 2*V_22(i,j)*r_2[j];
+            }
+
+        C[{1,3}] = C13;
+        C[{2,3}] = C23;
+        C[{3,1}] = TMatrixD(TMatrixD::kTransposed, C13);
+        C[{3,2}] = TMatrixD(TMatrixD::kTransposed, C23);
+        
+        // C_33
+        TMatrixD C33(nHits, nHits);
+        for(auto i = 0; i < 2; ++i)
+            for(auto j = 0; j < 2; ++j)
+            {
+                const TMatrixD &Vii = (i == 0 ? V_11 : V_22);
+                const TMatrixD &Vij = (i == 0 && j == 0) ? V_11 :
+                                      (i == 0 && j == 1) ? V_12 :
+                                      (i == 1 && j == 0) ? V_21 : V_22;
+
+                const RVecD &ri = (i == 0 ? r_1 : r_2);
+                const RVecD &rj = (j == 0 ? r_1 : r_2);
+
+                for(auto m = 0; m < nHits; ++m)
+                    for(auto n = 0; n < nHits; ++n)
+                        C33(m,n) += 2*Vii(m,n)*Vij(m,n) + 4*Vij(m,n)*ri[m]*rj[n];
+            }
+
+        C[{3,3}] = C33;
+
+        
+        // ... Center of gravity ...
+        w /= Sum(w);
+        TVectorD w_vec(w.size());
+        for(auto i = 0; i < w.size(); ++i)
+            w_vec(i) = w[i];
+
+        TMatrixD r_mat(nHits, 3);
+        for(auto j = 0; j < 3; ++j)
+            for(auto i = 0; i < nHits; ++i)    
+                r_mat(i,j) = r[j*nHits + i];
+        
+        TMatrixD r_mat_tr(TMatrixD::kTransposed, r_mat);
+        TVectorD r_0 = r_mat_tr * w_vec;
+        
+        // Var(r_0)
+        TMatrixD C_0(3,3);
+
+        for(auto i = 1; i <= 3; ++i)
+        {
+            for(auto j = 1; j <= 3; ++j)
+            {
+                const TMatrixD &Cij = C[{i,j}];
+                C_0(i-1,j-1) = Cij.Similarity(w_vec);
+            }
+        }
+
+        // ... Substract ...
+        TMatrixD H(nHits, nHits);
+        for(auto i = 0; i < nHits; ++i)
+            for(auto j = 0; j < nHits; ++j)
+                H(i,j) = (i == j ? 1 : 0) - w_vec(j); 
+
+        // s and D Matrix
+        TMatrixD s = H*r_mat;
+        
+        map<Int_t, TVectorD> s_map;
+        for(auto i = 1; i <= 3; ++i)
+            s_map.insert({i, TVectorD(nHits)});
+
+        for(auto i = 0; i < nHits; ++i)
+        {
+            s_map[1](i) = s(i,0);
+            s_map[2](i) = s(i,1);
+            s_map[3](i) = s(i,2);
+        }
+        
+        
+        map<pair<Int_t,Int_t>, TMatrixD> D;
+        for(auto i = 1; i <= 3; ++i)
+            for(auto j = 1; j <= 3; ++j)
+                D.insert({{i, j}, TMatrixD(nHits, nHits)});
+
+        for(auto i = 1; i <= 3; ++i)
+        {
+            for(auto j = 1; j <= 3; ++j)
+            {
+                TMatrixD &Dij = D[{i,j}];
+                const TMatrixD &Cij = C[{i,j}];
+                TMatrixD H_tr(TMatrixD::kTransposed, H);
+                
+                Dij = H * Cij * H_tr;
+            }
+        }
+        
+        // ... Computation of weighted sample covariance matrix 𝑨 ...
+        map<Int_t, pair<Int_t,Int_t>> nu = {
+            {1, {1,1}},
+            {2, {1,2}},
+            {3, {1,3}},
+            {4, {2,2}},
+            {5, {2,3}},
+            {6, {3,3}}
+        };
+        
+        map<Int_t, Double_t> A_alpha;
+        for(auto alpha = 1; alpha <= 6; ++alpha)
+        {
+            auto [i, j] = nu[alpha];
+            TVectorD w_sj(nHits);
+            for(auto k = 0; k < w.size(); ++k)
+                w_sj[k] = w_vec(k) * s_map[j](k); // w ⊙ s_j
+    
+            A_alpha[alpha] = s_map[i] * w_sj; // s_iᵀ ⋅ (w ⊙ s_j)
+        }
+        
+        
+        // Compute covariance matrix of A E_{alpha,beta} for alpha, beta = 1..6
+        TMatrixDSym E(6);
+        
+        // Precompute W2 = w * w^T (outer product)
+        TMatrixD W2(nHits, nHits);
+        for(auto i = 0; i < nHits; ++i)
+            for(auto j = 0; j < nHits; ++j)
+                W2(i,j) = w_vec(i) * w_vec(j);
+        
+        for(auto alpha = 1; alpha <= 6; ++alpha)
+        {
+            auto [i, j] = nu[alpha];
+            const auto& si = s_map[i];
+            const auto& sj = s_map[j];
+            
+            for(auto beta = alpha; beta <= 6; ++beta)
+            {
+                auto [k, l] = nu[beta];
+                const auto& sk = s_map[k];
+                const auto& sl = s_map[l];
+
+                const TMatrixD& Dik = D[{i,k}];
+                const TMatrixD& Dil = D[{i,l}];
+                const TMatrixD& Djk = D[{j,k}];
+                const TMatrixD& Djl = D[{j,l}];
+            
+                // Hadamard products
+                Double_t S_term = 0.;
+
+                for(auto qi = 0; qi < nHits; ++qi)
+                    for(auto qj = 0; qj < nHits; ++qj)
+                        S_term += (Dik(qi,qj) * W2(qi,qj) * Djl(qi, qj) + Dil(qi,qj) * W2(qi,qj) * Djk(qi, qj));
+
+                TMatrixD temp_jl2(nHits, nHits), temp_jk2(nHits, nHits), temp_il2(nHits, nHits), temp_ik2(nHits, nHits);
+                for(auto qu = 0; qu < nHits; ++qu)
+                    for(auto qv = 0; qv < nHits; ++qv)
+                    {
+                        temp_jl2(qu,qv) = Djl(qu,qv) * W2(qu,qv);
+                        temp_jk2(qu,qv) = Djk(qu,qv) * W2(qu,qv);
+                        temp_il2(qu,qv) = Dil(qu,qv) * W2(qu,qv);
+                        temp_ik2(qu,qv) = Dik(qu,qv) * W2(qu,qv);
+                    }
+                
+                Double_t scalar = si * (temp_jl2 * sk) + si * (temp_jk2 * sl) + sj * (temp_il2 * sk) + sj * (temp_ik2 * sl);
+                
+                // Finally
+                E(alpha - 1, beta - 1) = S_term + scalar;
+                
+                if(alpha != beta)
+                    E(beta - 1, alpha - 1) = E(alpha - 1, beta - 1); // symmetry
+            }
+        }
+
+        //E.Print();
+        
+        // ... Computation of n and c
+        // A matrix
+        TMatrixDSym A(3); A.Zero();
+        for(auto alpha = 1; alpha <= 6; ++alpha)
+        {
+            auto [i, j] = nu[alpha];
+            A(i-1,j-1) = A_alpha[alpha];
+            A(j-1,i-1) = A_alpha[alpha];
+        }
+        
+        // Diagonalizzazione
+        TVectorD eigenVals(3);
+        TMatrixD eigenVecs = A.EigenVectors(eigenVals);
+
+        // Normale = autovettore con autovalore minimo
+        Int_t minIdx = (eigenVals(0) < eigenVals(1)) ?
+                        ((eigenVals(0) < eigenVals(2)) ? 0 : 2) :
+                        ((eigenVals(1) < eigenVals(2)) ? 1 : 2);
+
+        TVectorD n(3);
+        for(Int_t i = 0; i < 3; ++i)
+            n[i] = eigenVecs(i, minIdx);
+        
+        Double_t c = -(n*r_0);
+        
+        // Compute the Jacobian
+        TMatrixD J2(3, 6);
+        const Double_t epsilon = 1e-2;
+        
+        for(auto alpha = 1; alpha <= 6; ++alpha)
+        {
+            // Copia A_alpha e perturba il solo alpha-esimo parametro
+            auto A_plus = A_alpha;
+            auto A_minus = A_alpha;
+
+            A_plus[alpha] += epsilon;
+            A_minus[alpha] -= epsilon;
+
+            auto calc_n = [&](const map<Int_t, Double_t>& A_mod) -> TVectorD
+            {
+                TMatrixDSym A_mat(3); A_mat.Zero();
+                for(auto a = 1; a <= 6; ++a)
+                {
+                    auto [i, j] = nu[a];
+                    A_mat(i-1,j-1) = A_mod.at(a);
+                    A_mat(j-1,i-1) = A_mod.at(a);
+                }
+
+                TVectorD evals(3);
+                TMatrixD evecs = A_mat.EigenVectors(evals);
+
+                Int_t minIdx = (evals(0) < evals(1)) ? ((evals(0) < evals(2)) ? 0 : 2)
+                                           : ((evals(1) < evals(2)) ? 1 : 2);
+
+                TVectorD n(3);
+                
+                for(auto i = 0; i < 3; ++i)
+                    n[i] = evecs(i, minIdx);
+
+                return n;
+            };
+
+            TVectorD n_plus  = calc_n(A_plus);
+            TVectorD n_minus = calc_n(A_minus);
+
+            for(auto i = 0; i < 3; ++i)
+                J2(i, alpha - 1) = (n_plus[i] - n_minus[i]) / (2. * epsilon);
+        }
+
+        //TMatrixDSym C_n(3, 3);
+        auto C_n = E.Similarity(J2);      // J2 * E * J2ᵀ
+
+        
+        // Joint covariance matrix of n and c
+        // Parte alta-sinistra: Cn
+        TMatrixD Cnc(4, 4);
+        for(auto i = 0; i < 3; ++i)
+            for(auto j = 0; j < 3; ++j)
+                Cnc(i, j) = C_n(i, j);
+
+        // Parte in alto a destra: -Cn * r0
+        TVectorD Cn_r0(3);
+        Cn_r0 = C_n * r_0;
+
+        for(auto i = 0; i < 3; ++i)
+        {
+            Cnc(i, 3) = -Cn_r0[i];       // colonna finale
+            Cnc(3, i) = -Cn_r0[i];       // riga finale (simmetrico)
+        }
+
+        // Calcolo var[c]
+        Double_t ncnrcr = C_0.Similarity(n) + C_n.Similarity(r_0);
+        Double_t S_trace = 0.;
+        for(auto i = 0; i < 3; ++i)
+            for(auto j = 0; j < 3; ++j)
+                S_trace += C_n(i,j) * C_0(i,j); // Hadamard product
+
+        Double_t var_c = ncnrcr + S_trace;
+        Cnc(3, 3) = var_c;
+
+        
+        // ... Circle parameters ...
+        const Double_t xC = -n(0) / (2 * n(2));
+        const Double_t yC = -n(1) / (2 * n(2));
+        Double_t r2 = (1 - n(2)*n(2) - 4 * c * n(2)) / (4 * n(2)*n(2));
+        const Double_t R  = sqrt(r2);
+        
+        // Jacobian
+        Double_t h = sqrt(1 - n(2)*n(2) - 4*c*n(2));
+        TMatrixD J3(3,4);   J3.Zero();
+        J3(0,0) = -1./(2*n(2));     J3(0,2) = n(0)/(2*n(2)*n(2));
+        J3(1,1) = -1./(2*n(2));     J3(1,2) = n(1)/(2*n(2)*n(2));
+        J3(2,2) = -h/(2*n(2)*n(2)) - (4*c + 2*n(2)) / (4*h*n(2));
+        J3(2,3) = -1./h;
+        
+        
+        // Covariance matrix
+        TMatrixD J3_tr = TMatrixD(TMatrixD::kTransposed, J3);
+        TMatrixD covCircle(3,3);
+        covCircle = J3 * Cnc * J3_tr;
+        
+        if(!opts.processAll)
+            cout << Form("\nxC = %f +/- %f\nyC = %f +/- %f\nR = %f +/- %f\n\n", xC, sqrt(covCircle(0,0)), yC, sqrt(covCircle(1,1)), R, sqrt(covCircle(2,2)));
+        
+
+        
+        // --- Fit helix in Z vs arc length s ---
+        vector<Double_t> s_values;
+        vector<Double_t> z_values;
+
+        // Choose the pivot
+        const TVector3 pivot = measuredCoordinates[0];
+
+        // Compute phi0 and dr
+        const Double_t phi0 = atan2(pivot.Y() - yC, pivot.X() - xC);
+        const Double_t cos_phi0 = cos(phi0);
+        const Double_t sin_phi0 = sin(phi0);
+        const Double_t dr = sqrt(pow(pivot.X() - xC, 2) + pow(pivot.Y() - yC, 2)) - R;
+
+        // Compute arc lengths s
+        Double_t previous_phi = phi0;
+        Double_t previous_s = 0;
+        for(const auto& point : measuredCoordinates)
+        {
+            Double_t dx = point.X() - xC;
+            Double_t dy = point.Y() - yC;
+            Double_t phi = atan2(dy, dx);
+
+            // Angle unwrapping
+            Double_t dphi = phi - previous_phi;
+            if(dphi > TMath::Pi()) dphi -= 2 * TMath::Pi();
+            if(dphi < -TMath::Pi()) dphi += 2 * TMath::Pi();
+            dphi *= -1;
+
+            Double_t s = previous_s + R * dphi;
+
+            s_values.push_back(s);
+            z_values.push_back(point.Z());
+
+            previous_phi = phi;
+            previous_s = s;
+        }
+
+        // --- Fit z vs s ---
+        auto *graphZvsS = new TGraphErrors(s_values.size());
+        for(size_t i = 0; i < s_values.size(); ++i)
+        {
+            Double_t s = s_values[i];
+            Double_t z = z_values[i];
+
+            // Get the hit            
+            const auto& hit = measuredCoordinates[i];
+            const TMatrixDSym& matCov = hitCov.GetMatrixCartesian((*(data.cylinderID))[i], atan2(hit.Y(), hit.X()));
+            
+            // Uncertainties on Z
+            Double_t sigmaZ = sqrt(matCov(2, 2));
+
+            graphZvsS->SetPoint(i, s, z);
+            graphZvsS->SetPointError(i, 0, sigmaZ);
+        }
+
+        TF1 *fitZvsS = new TF1("fitZvsS", "[0] + x*[1]", -10, 10);
+        fitZvsS->SetParNames("z0", "tan(lambda)");
+        fitZvsS->SetParameters(0, 1);
+        TFitResultPtr fitlinePtr = nullptr;
+        if(!opts.processAll) 
+            fitlinePtr= graphZvsS->Fit(fitZvsS, "S");
+        else
+            fitlinePtr= graphZvsS->Fit(fitZvsS, "SQ");
+
+        // Get results
+        Double_t z0 = fitZvsS->GetParameter(0);
+        Double_t tanLambda = fitZvsS->GetParameter(1);
+        
+        TMatrixDSym covLine = fitlinePtr->GetCovarianceMatrix();
+        
+        
+        // Helix Fit result
+        Bool_t isFitConverged = fitlinePtr->IsValid();
+        if(isFitConverged)
+        {
+            inEfficiency++;
+            
+            // Construct the full params vector
+            TVectorD parHelix(5);
+            parHelix(0) = xC; parHelix(1) = yC; parHelix(2) = R;
+            parHelix(3) = z0; parHelix(4) = tanLambda;
+
+            // Construct the full covariance matrix
+            TMatrixDSym covHelix(5);
+            for(Int_t i = 0; i < 3; ++i)
+                for(Int_t j = 0; j < 3; ++j)
+                    covHelix(i, j) = covCircle(i, j);
+            for(Int_t i = 0; i < 2; ++i)
+                for(Int_t j = 0; j < 2; ++j)
+                    covHelix(i + 3, j + 3) = covLine(i, j);
+
+
+            // Fit info and plots
+            if(!opts.processAll)
+            {
+                // --- Output parameters ---
+                cout << "\n\nHelix parameters:";
+                parHelix.Print();
+                cout << "Phi0 = " << phi0 << endl;
+
+                // --- Covariance matrix ---
+                covHelix.Print();
+            
+            
+                // Convert hits
+                vector<vector<Double_t>> plottedCoordsVec;
+                for(const auto& vec : measuredCoordinates)
+                    plottedCoordsVec.push_back({vec.X(), vec.Y(), vec.Z()});
+
+                // Canvas
+                TCanvas *canvHitsXY = new TCanvas("canvHitsXY", "XY View", 700, 700);
+                TCanvas *canvHitsYZ = new TCanvas("canvHitsYZ", "YZ View", 900, 500);
+                TCanvas *canvHitsXYZ = new TCanvas("canvHitsXYZ", "3D Helix Fit", 800, 600);
+                TCanvas *canvZvsS = new TCanvas("canvZvsS", "z vs s", 700, 500);
+            
+                AUXALG::DrawXYView_hits(data.fOrigin, plottedCoordsVec, canvHitsXY);
+                AUXALG::DrawYZView_hits(data.fOrigin, plottedCoordsVec, canvHitsYZ);
+                AUXALG::DrawXYZView_hits(plottedCoordsVec, canvHitsXYZ);
+            
+                AUXALG::DrawXYView_arc(xC, yC, R, plottedCoordsVec, canvHitsXY, nTurns, opts.turnID);
+                AUXALG::DrawZvsSFit(graphZvsS, fitZvsS, canvZvsS);
+                AUXALG::DrawXYZView_helixFromHits(xC, yC, R, z0, phi0, tanLambda, plottedCoordsVec, canvHitsXYZ);
+            }
+        
+            // Extrapolate status at decay vertex
+            // Find s at z = 0
+            Double_t s_at_z0 = -z0 / tanLambda;
+            Double_t phi_at_z0 = s_at_z0 / R;
+        
+            // Vertex decay
+            Double_t x_at_z0 = xC + R * cos(phi0 - phi_at_z0);
+            Double_t y_at_z0 = yC + R * sin(phi0 - phi_at_z0);
+                //Double_t x_at_z0 = pivot.X() - dr * cos_phi0 + R * (cos(phi0 - phi_at_z0) - cos_phi0);
+                //Double_t y_at_z0 = pivot.Y() - dr * sin_phi0 + R * (sin(phi0 - phi_at_z0) - sin_phi0);
+            // Vertex momentum
+            const Double_t k = 2.99792458; // MeV/c * T * cm      
+            TVector3 pFitted(sin(phi0 - phi_at_z0), -cos(phi0 - phi_at_z0), tanLambda);
+            pFitted *= k * 2.2 * R;
+        
+            // Uncertainties
+            TMatrixD Jac = ANS::ComputeHelixJacobian(pivot, xC, yC, R, z0, tanLambda, 2.2);
+            TMatrixDSym covFittedState = covHelix.Similarity(Jac);
+            covFittedState = ANS::CovFromCardinalToCylindricalMom(covFittedState, pFitted);
+            
+            // Compute angles with muEDM convention
+            Double_t pFittedPhi = (pFitted.Phi() > 0 ) ? pFitted.Phi() : pFitted.Phi() + TMath::TwoPi();
+            Double_t pFitted_z = cos(pFitted.Theta());
+            Double_t pFitted_r = sin(pFitted.Theta()) * (x_at_z0 * cos(pFittedPhi) + y_at_z0 * sin(pFittedPhi)) / sqrt(x_at_z0*x_at_z0 + y_at_z0*y_at_z0);
+            Double_t pFittedTheTheta = atan2(pFitted_z, pFitted_r);
+            
+            // Fitted final extrapolated state
+                // x, y, z, p, TheTheta, phi
+            TVectorD fittedState(6); 
+            fittedState(0) = x_at_z0;
+            fittedState(1) = y_at_z0;
+            fittedState(2) = 0.;
+            fittedState(3) = pFitted.Mag();
+            fittedState(4) = pFittedTheTheta;
+            fittedState(5) = pFittedPhi;
+
+            // Print results
+            if(!opts.processAll)
+            {
+                cout << "\nFitted vertex position: (" << fittedState(0) << ", " << fittedState(1) << ", 0) cm" << endl;
+                cout << Form("Fidded p = (%.2f, %.2f, %.2f) MeV/c", pFitted.X(), pFitted.Y(), pFitted.Z()) << endl;
+                cout << Form("(p, theta, phi) = (%.2f MeV/c, %.2f pi rad, %.2f pi rad)", fittedState(3), fittedState(4)/TMath::Pi(), fittedState(5)/TMath::Pi());
+                cout << endl;
+
+                covFittedState.Print();
+            }
+
+            // Fill histos
+            auto [fRes, fSigma, fPulls] = AUXALG::GetResults(fittedState, covFittedState, (*data.fOrigin)*1E-1, data.trueMomentum, theThetaAngle, data.azimuthalAngle, NORMALIZED_PULLS);
+            if(fRes.size() == 0)
+                continue;
+
+            data.histDiffX->Fill(fPulls[0]);
+            data.histDiffY->Fill(fPulls[1]);
+            data.histDiffZ->Fill(fPulls[2]);
+            data.histDiffMom->Fill(fPulls[3]);
+            data.histDiffTheta->Fill(fPulls[4]);
+            data.histDiffPhi->Fill(fPulls[5]);
+
+            data.graphMom->Fill(data.trueMomentum, fRes[3]);
+            data.graphTheta->Fill(theThetaAngle, fRes[4]);
+            data.graphPhi->Fill(data.azimuthalAngle, fRes[5]);
+
+            data.hist2MomRes->Fill(data.trueMomentum, fSigma[3]);
+            data.hist2ThetaRes->Fill(theThetaAngle, fSigma[4]);
+            data.hist2PhiRes->Fill(data.azimuthalAngle, fSigma[5]);
+
+            data.profMomRes->Fill(data.trueMomentum, fSigma[3]);
+            data.profThetaRes->Fill(theThetaAngle, fSigma[4]);
+            data.profPhiRes->Fill(data.azimuthalAngle, fSigma[5]);
+        }
+        
+        if(!opts.processAll)
+        {
+            cout << "\n\n>>> Did FIT converge? " << (isFitConverged ? "Yes" : "No") << "\n\n" << endl;
+        }
+
+        // Track is in efficiency?
+        data.effTheta->Fill(isFitConverged, data.trueMomentum, theThetaAngle);
+        data.effPhi->Fill(isFitConverged, data.trueMomentum, data.azimuthalAngle);
+
+        // Store turns and cylinders data
+        data.histTurns->Fill(nTurns);
+        data.effTurns->Fill(isFitConverged, nTurns);
+        data.histCylinders->Fill(nCylinders);
+        data.effCylinders->Fill(isFitConverged, nCylinders);
+        data.histTurnsVMom->Fill(data.trueMomentum, nTurns);
+        data.histCylVMom->Fill(data.trueMomentum, nCylinders);
+
+        
+        cout << "\r>>> Processed event number " << ev << flush;
+        
+    }
+    
+    cout << endl;
+
+    // Print results and draw graphs
+    if(opts.processAll)
+    {
+        // Recap
+        cout << "\n---------------------------------------------------------" << endl;
+        cout << ">>> Acceptance = " << (Float_t) (inAcceptance * 100) / nEvents << endl;
+        cout << ">>> Efficiency = " << (Float_t) (inEfficiency * 100) / inAcceptance << endl;
+        cout << "---------------------------------------------------------\n" << endl;
+
+        // Graphs
+        if(opts.quietMode)
+            gROOT->SetBatch(true);
+
+        TCanvas *canvEfficiency = new TCanvas("canvEfficiency");
+        canvEfficiency->Divide(2,2);
+        canvEfficiency->cd(1);
+        data.accTheta->Draw("COLZ TEXT");
+        canvEfficiency->cd(2);
+        data.accPhi->Draw("COLZ TEXT");
+        canvEfficiency->cd(3);
+        data.effTheta->Draw("COLZ TEXT");
+        canvEfficiency->cd(4);
+        data.effPhi->Draw("COLZ TEXT");
+    
+        TCanvas *canvTurns = new TCanvas("canvTurns");
+        canvTurns->Divide(2);
+        canvTurns->cd(1);
+        data.histTurns->Draw();
+        canvTurns->cd(2);
+        data.effTurns->Draw("AP");
+
+        TCanvas *canvCylinders = new TCanvas("canvCylinders");
+        canvCylinders->Divide(2, 2);
+        canvCylinders->cd(1);
+        data.histCylinders->Draw();
+        canvCylinders->cd(2);
+        data.effCylinders->Draw("AP");
+        canvCylinders->cd(3);
+        data.histTurnsVMom->Draw();
+        canvCylinders->cd(4);
+        data.histCylVMom->Draw();
+        
+        TCanvas *canvLinearity = new TCanvas("canvLinearity");
+        canvLinearity->Divide(3);
+        canvLinearity->cd(1);
+        data.graphMom->SetMarkerStyle(20);
+        data.graphMom->Draw("SCAT");
+        canvLinearity->cd(2);
+        data.graphTheta->SetMarkerStyle(20);
+        data.graphTheta->Draw("SCAT");
+        canvLinearity->cd(3);
+        data.graphPhi->SetMarkerStyle(20);
+        data.graphPhi->Draw("SCAT");
+
+        TCanvas *canvfPullsPos = new TCanvas("Pulls Position");
+        canvfPullsPos->Divide(3);
+        
+        canvfPullsPos->cd(1);
+        data.histDiffX->Draw();
+        
+        canvfPullsPos->cd(2);
+        data.histDiffY->Draw();
+        
+        canvfPullsPos->cd(3);
+        data.histDiffZ->Draw();
+        
+        TCanvas *canvfPullsMom = new TCanvas("Pulls Momentum");   
+        canvfPullsMom->Divide(3);
+        
+        canvfPullsMom->cd(1);
+        data.histDiffMom->Draw();
+
+        canvfPullsMom->cd(2);
+        data.histDiffTheta->Draw();
+
+        canvfPullsMom->cd(3);
+        data.histDiffPhi->Draw();
+
+        TCanvas *canvProfRes = new TCanvas("ProfResolutions");
+        canvProfRes->Divide(3);
+        canvProfRes->cd(1);
+        data.profMomRes->Draw();
+        canvProfRes->cd(2);
+        data.profThetaRes->Draw();
+        canvProfRes->cd(3);
+        data.profPhiRes->Draw();
+
+        TCanvas *canvResMom = new TCanvas("canvResMom");
+        canvResMom->cd();
+        data.hist2MomRes->Draw();
+
+        TCanvas *canvResTheta = new TCanvas("canvResTheta");
+        canvResTheta->cd();
+        data.hist2ThetaRes->Draw();
+
+        TCanvas *canvResPhi = new TCanvas("canvResPhi");
+        canvResPhi->cd();
+        data.hist2PhiRes->Draw();
+
+        if(opts.quietMode)
+        {
+            canvEfficiency->SaveAs("canvEfficiency.pdf");
+            canvResMom->SaveAs("canvResMom.pdf");
+            canvResTheta->SaveAs("canvResTheta.pdf");
+            canvResPhi->SaveAs("canvResPhi.pdf");
+        }
+    }
+
+    // Trick
+    display->open();
+    
+    // Finally
+    exit(0);
+
+}
+
+
+
+array<Double_t, 6> FITALG::HelixPrefitter(const vector<vector<Double_t>>& hitsCoordinates, const vector<Int_t>& cylinders, Options opts)
+{
+    // Return
+    array<Double_t, 6> fParameters = {0, 0, 0, 0, 0, 0};
+
+    // Resolution of detectors
+    const CHeT::Resolutions hitCov;
+
+    // Fill the candidate
+    vector<TVector3> measuredCoordinates;
+    Int_t nHits = hitsCoordinates.size();
+
+    RVecD r_1, r_2;
+    RVecD w;
+    RVec<RVecD> V(2*nHits, RVecD(2*nHits));
+    
+    for(Int_t i = 0; i < nHits; i++)
+    {
+        TVector3 hitCoords;
+
+        // Measurements
+        vector<Double_t> measuredCoords = hitsCoordinates[i];
+
+        hitCoords[0] = measuredCoords.at(0);
+        hitCoords[1] = measuredCoords.at(1);
+        hitCoords[2] = measuredCoords.at(2);
+
+        measuredCoordinates.push_back(hitCoords);
+
+        Double_t uu = measuredCoords.at(0);
+        Double_t vv =  measuredCoords.at(1);
+        Double_t phi_global = atan2(vv, uu);
+
+        TMatrixDSym cov_xy = hitCov.GetMatrixCartesian(cylinders[i], phi_global).GetSub(0,1,0,1);
+        
+        TMatrixDSym cov_rphiz = hitCov.GetMatrixCylindrical(cylinders[i]); 
+        
+        // Fill m, V and w
+        r_1.push_back(uu);
+        r_2.push_back(vv);
+        w.push_back(1./cov_rphiz(1,1));
+
+        for(auto j = 0; j < 2; j++)
+            for(auto k = 0; k < 2; k++)
+                V[nHits*j + i][nHits*k + i] = cov_xy(j,k);
+    }
+
+    RVecD m_c = Concatenate(r_1,r_2);
+    
+    TMatrixD V_11(nHits, nHits),
+             V_12(nHits, nHits),
+             V_21(nHits, nHits),
+             V_22(nHits, nHits);
+    
+    for(auto i = 0; i < nHits; i++)
+        for(auto j = 0; j < nHits; j++)
+        {
+            V_11(i,j) = V[i][j];
+            V_12(i,j) = V[i][nHits + j];
+            V_21(i,j) = V[nHits + i][j];
+            V_22(i,j) = V[nHits + i][nHits + j];
+        }
+    
+    // ... Mapping ...
+    RVecD r_3 = r_1*r_1 + r_2*r_2;
+    
+    RVecD r = Concatenate(m_c, r_3);
+    
+    // C Matrix
+    map<pair<Int_t,Int_t>, TMatrixD> C;
+    for(auto i = 1; i <= 3; ++i)
+        for(auto j = 1; j <= 3; ++j)
+            C.insert({{i, j}, TMatrixD(nHits, nHits)});
+    
+    C[{1,1}] = V_11;
+    C[{1,2}] = V_12;
+    C[{2,1}] = V_21;
+    C[{2,2}] = V_22;
+    
+    // C_13, C_23
+    TMatrixD C13(nHits, nHits), C23(nHits, nHits);
+    for(auto i = 0; i < nHits; ++i)
+        for(auto j = 0; j < nHits; ++j)
+        {
+            C13(i,j) = 2*V_11(i,j)*r_1[j] + 2*V_12(i,j)*r_2[j];
+            C23(i,j) = 2*V_21(i,j)*r_1[j] + 2*V_22(i,j)*r_2[j];
+        }
+
+    C[{1,3}] = C13;
+    C[{2,3}] = C23;
+    C[{3,1}] = TMatrixD(TMatrixD::kTransposed, C13);
+    C[{3,2}] = TMatrixD(TMatrixD::kTransposed, C23);
+
+    // C_33
+    TMatrixD C33(nHits, nHits);
+    for(auto i = 0; i < 2; ++i)
+        for(auto j = 0; j < 2; ++j)
+        {
+            const TMatrixD &Vii = (i == 0 ? V_11 : V_22);
+            const TMatrixD &Vij = (i == 0 && j == 0) ? V_11 :
+                                  (i == 0 && j == 1) ? V_12 :
+                                  (i == 1 && j == 0) ? V_21 : V_22;
+
+            const RVecD &ri = (i == 0 ? r_1 : r_2);
+            const RVecD &rj = (j == 0 ? r_1 : r_2);
+
+            for(auto m = 0; m < nHits; ++m)
+                for(auto n = 0; n < nHits; ++n)
+                    C33(m,n) += 2*Vii(m,n)*Vij(m,n) + 4*Vij(m,n)*ri[m]*rj[n];
+        }
+
+    C[{3,3}] = C33;
+
+    
+    // ... Center of gravity ...
+    w /= Sum(w);
+    TVectorD w_vec(w.size());
+    for(auto i = 0; i < w.size(); ++i)
+        w_vec(i) = w[i];
+
+    TMatrixD r_mat(nHits, 3);
+    for(auto j = 0; j < 3; ++j)
+        for(auto i = 0; i < nHits; ++i)    
+            r_mat(i,j) = r[j*nHits + i];
+    
+    TMatrixD r_mat_tr(TMatrixD::kTransposed, r_mat);
+    TVectorD r_0 = r_mat_tr * w_vec;
+    
+    // Var(r_0)
+    TMatrixD C_0(3,3);
+
+    for(auto i = 1; i <= 3; ++i)
+    {
+        for(auto j = 1; j <= 3; ++j)
+        {
+            const TMatrixD &Cij = C[{i,j}];
+            C_0(i-1,j-1) = Cij.Similarity(w_vec);
+        }
+    }
+
+    // ... Substract ...
+    TMatrixD H(nHits, nHits);
+    for(auto i = 0; i < nHits; ++i)
+        for(auto j = 0; j < nHits; ++j)
+            H(i,j) = (i == j ? 1 : 0) - w_vec(j); 
+
+    // s and D Matrix
+    TMatrixD s = H*r_mat;
+    
+    map<Int_t, TVectorD> s_map;
+    for(auto i = 1; i <= 3; ++i)
+        s_map.insert({i, TVectorD(nHits)});
+
+    for(auto i = 0; i < nHits; ++i)
+    {
+        s_map[1](i) = s(i,0);
+        s_map[2](i) = s(i,1);
+        s_map[3](i) = s(i,2);
+    }
+    
+    
+    map<pair<Int_t,Int_t>, TMatrixD> D;
+    for(auto i = 1; i <= 3; ++i)
+        for(auto j = 1; j <= 3; ++j)
+            D.insert({{i, j}, TMatrixD(nHits, nHits)});
+
+    for(auto i = 1; i <= 3; ++i)
+    {
+        for(auto j = 1; j <= 3; ++j)
+        {
+            TMatrixD &Dij = D[{i,j}];
+            const TMatrixD &Cij = C[{i,j}];
+            TMatrixD H_tr(TMatrixD::kTransposed, H);
+            
+            Dij = H * Cij * H_tr;
+        }
+    }
+    
+    // ... Computation of weighted sample covariance matrix 𝑨 ...
+    map<Int_t, pair<Int_t,Int_t>> nu = {
+        {1, {1,1}},
+        {2, {1,2}},
+        {3, {1,3}},
+        {4, {2,2}},
+        {5, {2,3}},
+        {6, {3,3}}
+    };
+
+    map<Int_t, Double_t> A_alpha;
+    for(auto alpha = 1; alpha <= 6; ++alpha)
+    {
+        auto [i, j] = nu[alpha];
+        TVectorD w_sj(nHits);
+        for(auto k = 0; k < w.size(); ++k)
+            w_sj[k] = w_vec(k) * s_map[j](k); // w ⊙ s_j
+
+        A_alpha[alpha] = s_map[i] * w_sj; // s_iᵀ ⋅ (w ⊙ s_j)
+    }
+    
+    
+    // Compute covariance matrix of A E_{alpha,beta} for alpha, beta = 1..6
+    TMatrixDSym E(6);
+
+    // Precompute W2 = w * w^T (outer product)
+    TMatrixD W2(nHits, nHits);
+    for(auto i = 0; i < nHits; ++i)
+        for(auto j = 0; j < nHits; ++j)
+            W2(i,j) = w_vec(i) * w_vec(j);
+
+    for(auto alpha = 1; alpha <= 6; ++alpha)
+    {
+        auto [i, j] = nu[alpha];
+        const auto& si = s_map[i];
+        const auto& sj = s_map[j];
+        
+        for(auto beta = alpha; beta <= 6; ++beta)
+        {
+            auto [k, l] = nu[beta];
+            const auto& sk = s_map[k];
+            const auto& sl = s_map[l];
+
+            const TMatrixD& Dik = D[{i,k}];
+            const TMatrixD& Dil = D[{i,l}];
+            const TMatrixD& Djk = D[{j,k}];
+            const TMatrixD& Djl = D[{j,l}];
+        
+            // Hadamard products
+            Double_t S_term = 0.;
+
+            for(auto qi = 0; qi < nHits; ++qi)
+                for(auto qj = 0; qj < nHits; ++qj)
+                    S_term += (Dik(qi,qj) * W2(qi,qj) * Djl(qi, qj) + Dil(qi,qj) * W2(qi,qj) * Djk(qi, qj));
+
+            TMatrixD temp_jl2(nHits, nHits), temp_jk2(nHits, nHits), temp_il2(nHits, nHits), temp_ik2(nHits, nHits);
+            for(auto qu = 0; qu < nHits; ++qu)
+                for(auto qv = 0; qv < nHits; ++qv)
+                {
+                    temp_jl2(qu,qv) = Djl(qu,qv) * W2(qu,qv);
+                    temp_jk2(qu,qv) = Djk(qu,qv) * W2(qu,qv);
+                    temp_il2(qu,qv) = Dil(qu,qv) * W2(qu,qv);
+                    temp_ik2(qu,qv) = Dik(qu,qv) * W2(qu,qv);
+                }
+            
+            Double_t scalar = si * (temp_jl2 * sk) + si * (temp_jk2 * sl) + sj * (temp_il2 * sk) + sj * (temp_ik2 * sl);
+            
+            // Finally
+            E(alpha - 1, beta - 1) = S_term + scalar;
+            
+            if(alpha != beta)
+                E(beta - 1, alpha - 1) = E(alpha - 1, beta - 1); // symmetry
+        }
+    }
+    
+
+    // ... Computation of n and c
+    // A matrix
+    TMatrixDSym A(3); A.Zero();
+    for(auto alpha = 1; alpha <= 6; ++alpha)
+    {
+        auto [i, j] = nu[alpha];
+        A(i-1,j-1) = A_alpha[alpha];
+        A(j-1,i-1) = A_alpha[alpha];
+    }
+
+    // Diagonalizzazione
+    TVectorD eigenVals(3);
+    TMatrixD eigenVecs = A.EigenVectors(eigenVals);
+
+    // Normale = autovettore con autovalore minimo
+    Int_t minIdx = (eigenVals(0) < eigenVals(1)) ?
+                    ((eigenVals(0) < eigenVals(2)) ? 0 : 2) :
+                    ((eigenVals(1) < eigenVals(2)) ? 1 : 2);
+
+    TVectorD n(3);
+    for(Int_t i = 0; i < 3; ++i)
+        n[i] = eigenVecs(i, minIdx);
+    
+    Double_t c = -(n*r_0);
+    
+    // Compute the Jacobian
+    TMatrixD J2(3, 6);
+    const Double_t epsilon = 1e-2;
+
+    for(auto alpha = 1; alpha <= 6; ++alpha)
+    {
+        // Copia A_alpha e perturba il solo alpha-esimo parametro
+        auto A_plus = A_alpha;
+        auto A_minus = A_alpha;
+
+        A_plus[alpha] += epsilon;
+        A_minus[alpha] -= epsilon;
+
+        auto calc_n = [&](const map<Int_t, Double_t>& A_mod) -> TVectorD
+        {
+            TMatrixDSym A_mat(3); A_mat.Zero();
+            for(auto a = 1; a <= 6; ++a)
+            {
+                auto [i, j] = nu[a];
+                A_mat(i-1,j-1) = A_mod.at(a);
+                A_mat(j-1,i-1) = A_mod.at(a);
+            }
+
+            TVectorD evals(3);
+            TMatrixD evecs = A_mat.EigenVectors(evals);
+
+            Int_t minIdx = (evals(0) < evals(1)) ? ((evals(0) < evals(2)) ? 0 : 2)
+                                       : ((evals(1) < evals(2)) ? 1 : 2);
+
+            TVectorD n(3);
+            
+            for(auto i = 0; i < 3; ++i)
+                n[i] = evecs(i, minIdx);
+
+            return n;
+        };
+
+        TVectorD n_plus  = calc_n(A_plus);
+        TVectorD n_minus = calc_n(A_minus);
+
+        for(auto i = 0; i < 3; ++i)
+            J2(i, alpha - 1) = (n_plus[i] - n_minus[i]) / (2. * epsilon);
+    }
+
+    //TMatrixDSym C_n(3, 3);
+    auto C_n = E.Similarity(J2);      // J2 * E * J2ᵀ
+
+
+    // Joint covariance matrix of n and c
+    // Parte alta-sinistra: Cn
+    TMatrixD Cnc(4, 4);
+    for(auto i = 0; i < 3; ++i)
+        for(auto j = 0; j < 3; ++j)
+            Cnc(i, j) = C_n(i, j);
+
+    // Parte in alto a destra: -Cn * r0
+    TVectorD Cn_r0(3);
+    Cn_r0 = C_n * r_0;
+
+    for(auto i = 0; i < 3; ++i)
+    {
+        Cnc(i, 3) = -Cn_r0[i];       // colonna finale
+        Cnc(3, i) = -Cn_r0[i];       // riga finale (simmetrico)
+    }
+
+    // Calcolo var[c]
+    Double_t ncnrcr = C_0.Similarity(n) + C_n.Similarity(r_0);
+    Double_t S_trace = 0.;
+    for(auto i = 0; i < 3; ++i)
+        for(auto j = 0; j < 3; ++j)
+            S_trace += C_n(i,j) * C_0(i,j); // Hadamard product
+
+    Double_t var_c = ncnrcr + S_trace;
+    Cnc(3, 3) = var_c;
+
+
+    // ... Circle parameters ...
+    const Double_t xC = -n(0) / (2 * n(2));
+    const Double_t yC = -n(1) / (2 * n(2));
+    Double_t r2 = (1 - n(2)*n(2) - 4 * c * n(2)) / (4 * n(2)*n(2));
+    const Double_t R  = sqrt(r2);
+    
+    // Jacobian
+    Double_t h = sqrt(1 - n(2)*n(2) - 4*c*n(2));
+    TMatrixD J3(3,4);   J3.Zero();
+    J3(0,0) = -1./(2*n(2));     J3(0,2) = n(0)/(2*n(2)*n(2));
+    J3(1,1) = -1./(2*n(2));     J3(1,2) = n(1)/(2*n(2)*n(2));
+    J3(2,2) = -h/(2*n(2)*n(2)) - (4*c + 2*n(2)) / (4*h*n(2));
+    J3(2,3) = -1./h;
+    
+
+    // Covariance matrix
+    TMatrixD J3_tr = TMatrixD(TMatrixD::kTransposed, J3);
+    TMatrixD covCircle(3,3);
+    covCircle = J3 * Cnc * J3_tr;
+    
+    if(!opts.processAll)
+        cout << Form("\n>>> Prefitter =\nxC = %f +/- %f\nyC = %f +/- %f\nR = %f +/- %f\n\n", xC, sqrt(covCircle(0,0)), yC, sqrt(covCircle(1,1)), R, sqrt(covCircle(2,2)));
+    
+
+    
+    // --- Fit helix in Z vs arc length s ---
+    vector<Double_t> s_values;
+    vector<Double_t> z_values;
+
+    // Choose the pivot
+    const TVector3 pivot = measuredCoordinates[0];
+
+    // Compute phi0 and dr
+    const Double_t phi0 = atan2(pivot.Y() - yC, pivot.X() - xC);
+    const Double_t cos_phi0 = cos(phi0);
+    const Double_t sin_phi0 = sin(phi0);
+    const Double_t dr = sqrt(pow(pivot.X() - xC, 2) + pow(pivot.Y() - yC, 2)) - R;
+
+    // Compute arc lengths s
+    Double_t previous_phi = phi0;
+    Double_t previous_s = 0;
+    for(const auto& point : measuredCoordinates)
+    {
+        Double_t dx = point.X() - xC;
+        Double_t dy = point.Y() - yC;
+        Double_t phi = atan2(dy, dx);
+
+        // Angle unwrapping
+        Double_t dphi = phi - previous_phi;
+        if(dphi > TMath::Pi()) dphi -= 2 * TMath::Pi();
+        if(dphi < -TMath::Pi()) dphi += 2 * TMath::Pi();
+        dphi *= -1;
+
+        Double_t s = previous_s + R * dphi;
+
+        s_values.push_back(s);
+        z_values.push_back(point.Z());
+
+        previous_phi = phi;
+        previous_s = s;
+    }
+
+    // --- Fit z vs s ---
+    auto *graphZvsS = new TGraphErrors(s_values.size());
+    for(size_t i = 0; i < s_values.size(); ++i)
+    {
+        Double_t s = s_values[i];
+        Double_t z = z_values[i];
+
+        // Get the hit            
+        const auto& hit = measuredCoordinates[i];
+        const TMatrixDSym& matCov = hitCov.GetMatrixCartesian(cylinders[i], atan2(hit.Y(), hit.X()));
+        
+        // Uncertainties on Z
+        Double_t sigmaZ = sqrt(matCov(2, 2));
+
+        graphZvsS->SetPoint(i, s, z);
+        graphZvsS->SetPointError(i, 0, sigmaZ);
+    }
+
+    TF1 *fitZvsS = new TF1("fitZvsS", "[0] + x*[1]", -10, 10);
+    fitZvsS->SetParNames("z0", "tan(lambda)");
+    fitZvsS->SetParameters(0, 1);
+    TFitResultPtr fitlinePtr = nullptr;
+    if(!opts.processAll)
+        fitlinePtr= graphZvsS->Fit(fitZvsS, "S");
+    else
+        fitlinePtr= graphZvsS->Fit(fitZvsS, "SQ");
+
+    // Get results
+    Double_t z0 = fitZvsS->GetParameter(0);
+    Double_t tanLambda = fitZvsS->GetParameter(1);
+    
+    TMatrixDSym covLine = fitlinePtr->GetCovarianceMatrix();
+
+
+    // Helix Fit result
+    // Construct the full params vector
+    fParameters = {xC, yC, R, phi0, z0, tanLambda};
+
+    // Construct the full covariance matrix
+    TMatrixDSym covHelix(5);
+    for(Int_t i = 0; i < 3; ++i)
+        for(Int_t j = 0; j < 3; ++j)
+            covHelix(i, j) = covCircle(i, j);
+    for(Int_t i = 0; i < 2; ++i)
+        for(Int_t j = 0; j < 2; ++j)
+            covHelix(i + 3, j + 3) = covLine(i, j);
+
+    return fParameters;
+}
+
+
+
+
+
+//fitTrack->addTrackRep(repHelix);
+
+        //for(auto i = 0; i < nHits; ++i)
+        //{
+        //    auto tP = fitTrack->getPoint(i);
+        //    auto kFI = new genfit::KalmanFitterInfo(tP, rep);
+        //    //kFI->setRefenceState();
+        //    tP->setFitterInfo(kFI);
+        //    cout << tP->getKalmanFitterInfo() << endl;
+        //}

@@ -4,68 +4,6 @@ using namespace std;
 
 
 
-pair<vector<vector<Double_t>>, vector<Int_t>> AUXALG::SortVectorZ(vector<vector<Double_t>> vectors, vector<Int_t> cylinders)
-{
-    // Sort vectors according to z(third) value
-
-    vector<Double_t> z_of_vectors;
-    for(auto v : vectors)
-        z_of_vectors.push_back(abs(v.at(2)));
-
-    // initialize original index locations
-    vector<size_t> idx(z_of_vectors.size());
-    iota(idx.begin(), idx.end(), 0);
-
-    // sort indexes based on comparing values in v
-    // using stable_sort instead of sort
-    // to avoid unnecessary index re-orderings
-    // when v contains elements of equal values 
-    stable_sort(idx.begin(), idx.end(),
-        [&z_of_vectors](size_t i1, size_t i2) {return z_of_vectors[i1] < z_of_vectors[i2];});
-
-    vector<vector<Double_t>> copy_vector;
-    for(auto i : idx)
-        copy_vector.push_back(vectors.at(i));
-
-    vector<Int_t> copy_cylinders;
-    for(auto i : idx)
-        copy_cylinders.push_back(cylinders.at(i));
-
-    return {copy_vector, copy_cylinders};
-}
-
-
-
-pair<vector<vector<Double_t>>, vector<Int_t>> AUXALG::ShuffleVectorZ(vector<vector<Double_t>> vectors, vector<Int_t> cylinders)
-{
-    // Shuffle the vectors and cylinders randomly
-    
-    // Create a random engine and a distribution
-    random_device rd;
-    mt19937 g(rd());
-
-    // Combine vectors and cylinders into a single vector of pairs
-    vector<pair<vector<Double_t>, Int_t>> combined;
-    for (size_t i = 0; i < vectors.size(); ++i) {
-        combined.push_back({vectors[i], cylinders[i]});
-    }
-
-    // Shuffle the combined vector randomly
-    shuffle(combined.begin(), combined.end(), g);
-
-    // Extract the shuffled vectors and cylinders back
-    vector<vector<Double_t>> shuffled_vectors;
-    vector<Int_t> shuffled_cylinders;
-    for (const auto& p : combined) {
-        shuffled_vectors.push_back(p.first);
-        shuffled_cylinders.push_back(p.second);
-    }
-
-    return {shuffled_vectors, shuffled_cylinders};
-}
-
-
-
 void AUXALG::DrawXYView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas)
 {
     canvas->cd();
@@ -91,13 +29,13 @@ void AUXALG::DrawXYView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoor
     Double_t y0 = origin->Y()*1E-1;
     TGraph *ogr = new TGraph(1, &x0, &y0);
     ogr->SetMarkerStyle(20);
-    ogr->SetMarkerColor(kRed);
+    ogr->SetMarkerColor(kGreen);
 
-    TEllipse *ell[7];
-    Float_t R[7] = {8.55, 7.55, 6.55, 3.9, 3.7, 2.1, 1.7};
-    for(auto i = 0; i < 7; i++)
+    TEllipse *ell[CHeT::nCylinders];
+    for(auto i = 0; i < CHeT::nCylinders; i++)
     {
-        ell[i] = new TEllipse(0, 0, R[i]);
+        ell[i] = new TEllipse(0, 0, CHeT::Radii[CHeT::nCylinders - 1 - i]);
+        ell[i]->SetFillStyle(0);
         ell[i]->Draw("same");
     }
 
@@ -133,16 +71,15 @@ void AUXALG::DrawYZView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoor
     Double_t y0 = origin->Y()*1E-1;
     TGraph *ogr = new TGraph(1, &z0, &y0);
     ogr->SetMarkerStyle(20);
-    ogr->SetMarkerColor(kRed);
+    ogr->SetMarkerColor(kGreen);
 
-    TBox *box[7];
-    Float_t L = 30;
-    Float_t R[7] = {8.55, 7.55, 6.55, 3.9, 3.7, 2.1, 1.7};
-    for(auto i = 0; i < 7; i++)
+    TBox *box[CHeT::nCylinders];
+    for(auto i = 0; i < CHeT::nCylinders; i++)
     {
-        box[i] = new TBox(-L, -R[i], L, R[i]);
+        box[i] = new TBox(-CHeT::Length, -CHeT::Radii[CHeT::nCylinders - 1 - i], CHeT::Length, CHeT::Radii[CHeT::nCylinders - 1 - i]);
         box[i]->SetFillStyle(0);
         box[i]->SetLineColor(kBlack);
+        box[i]->SetFillStyle(0);
         box[i]->Draw("same");
     }
 
@@ -182,181 +119,141 @@ void AUXALG::DrawXYZView_hits(vector<vector<Double_t>> hitsCoordinates, TCanvas 
 
 
 
-Int_t AUXALG::CountTurns(const vector<vector<Double_t>> hitsCoordinates) 
+void AUXALG::DrawXYView_arc(Double_t xC, Double_t yC, Double_t R, const vector<vector<Double_t>> &hitsCoordinates, TCanvas* canvas, Int_t nTurns, Float_t turnID)
 {
-    if(hitsCoordinates.size() < 3) 
-        return 0; // Servono almeno 3 punti per trovare un massimo o minimo
 
-    Int_t nTurns = 0;
-    Bool_t foundMax = false, foundMin = false;
+    TVector3 first(hitsCoordinates.front()[0],
+                hitsCoordinates.front()[1],
+                hitsCoordinates.front()[2]);
 
-    for(size_t i = 1; i < hitsCoordinates.size() - 1; i++)
+    TVector3 last(hitsCoordinates.back()[0],
+                hitsCoordinates.back()[1],
+                hitsCoordinates.back()[2]);
+
+    // Compute phi start and end
+    Double_t phi1 = atan2(first.Y() - yC, first.X() - xC);
+    Double_t phi2 = atan2(last.Y()  - yC, last.X()  - xC);
+          
+    // Clockwise
+    Double_t dphi = phi2 - phi1;
+    if(dphi > 0)
+    dphi -= TMath::TwoPi();
+        
+    // Full turn
+    if(nTurns > 0 && turnID >= 1)
     {
-        Double_t yPrev = hitsCoordinates[i - 1][1];
-        Double_t yCurr = hitsCoordinates[i][1];
-        Double_t yNext = hitsCoordinates[i + 1][1];
+        phi1 = 0;
+        dphi = -TMath::TwoPi();
+    }
+        
+    // Use TPolyline for arc
+    const Int_t nPoints = 100;
+    TPolyLine *arc = new TPolyLine(nPoints);
+    for(Int_t i = 0; i < nPoints; ++i)
+    {
+        Double_t t = (Double_t)i / (nPoints - 1);
+        Double_t phi = phi1 + t * dphi;
+        Double_t x = xC + R * cos(phi);
+        Double_t y = yC + R * sin(phi);
+        arc->SetPoint(i, x, y);
+    }
+        
+    arc->SetLineColor(kRed);
+    arc->SetLineWidth(2);
+    canvas->cd();
+    arc->Draw("L same");
+    canvas->Update();
+}
 
-        // Controlliamo se è un massimo locale
-        if(yCurr > yPrev && yCurr > yNext)
-        {
-            foundMax = true;
-        }
-        // Controlliamo se è un minimo locale
-        else if(yCurr < yPrev && yCurr < yNext)
-        {
-            foundMin = true;
-        }
 
-        // Se abbiamo sia un massimo che un minimo -> un giro completato
-        if(foundMax && foundMin)
-        {
-            nTurns++;
-            foundMax = false;
-            foundMin = false;
-        }
+
+void AUXALG::DrawXYZView_helixFromHits(Double_t xC, Double_t yC, Double_t R,
+                                       Double_t z0, Double_t phi0,
+                                       Double_t tanLambda,
+                                       vector<vector<Double_t>> &hitsCoordinates,
+                                       TCanvas *canvas)
+{
+    const Int_t q = +1;
+    const Int_t eta = q/abs(q);
+    const Double_t cos_phi0 = cos(phi0);
+    const Double_t sin_phi0 = sin(phi0);
+
+    // Cumulative arc length computation
+    vector<Double_t> s_cumulative;
+    Double_t previous_phi = phi0;
+    Double_t previous_s = 0;
+
+    for(const auto& point : hitsCoordinates)
+    {
+        Double_t dx = point[0] - xC;
+        Double_t dy = point[1] - yC;
+        Double_t phi = atan2(dy, dx);
+        Double_t dphi = phi - previous_phi;
+        if(dphi > M_PI) dphi -= 2 * M_PI;
+        if(dphi < -M_PI) dphi += 2 * M_PI;
+        dphi *= -eta;
+        Double_t s = previous_s + R * dphi;
+        s_cumulative.push_back(s);
+        previous_phi = phi;
+        previous_s = s;
     }
 
-    return nTurns;
-}
+    // Create helix using s_cumulative.front() to s_cumulative.back()
+    Double_t s_start = s_cumulative.front();
+    Double_t s_end   = s_cumulative.back();
+    if(s_start > s_end)
+        swap(s_start, s_end);
 
-
-
-pair<vector<vector<Double_t>>, vector<Int_t>> AUXALG::SelectTurn(Float_t turnID, const vector<vector<Double_t>>& hitsCoordinates, const vector<Int_t>& cylinders)
-{
-    vector<vector<Double_t>> turnHits;
-    vector<Int_t> turnCylinders;
-
-    if (hitsCoordinates.size() < 3)
-        return {turnHits, turnCylinders}; // Troppi pochi punti per definire un giro
-
-    Int_t totalTurns = CountTurns(hitsCoordinates);
-    if (turnID > totalTurns)
-        return {hitsCoordinates, cylinders}; // Se voglio più giri di quelli presenti, prendo tutta la traccia
-
-    Double_t nHalfTurns = 0.0;
-    turnHits.push_back(hitsCoordinates.front()); // Includi il primo punto
-    turnCylinders.push_back(cylinders.front());
-
-    for (size_t i = 1; i < hitsCoordinates.size() - 1; i++)
+    vector<vector<Double_t>> helixPoints3D;
+    for(Double_t s = s_start; s <= s_end; s += 0.1)
     {
-        Double_t yPrev = hitsCoordinates[i - 1][1];
-        Double_t yCurr = hitsCoordinates[i][1];
-        Double_t yNext = hitsCoordinates[i + 1][1];
+        Double_t phi = s / R;
+        Double_t cos_diff = cos(phi0 - eta*phi);
+        Double_t sin_diff = sin(phi0 - eta*phi);
 
-        // Identificazione di un massimo o minimo locale
-        if ((yCurr > yPrev && yCurr > yNext) || (yCurr < yPrev && yCurr < yNext))
-        {
-            nHalfTurns += 1.0; // Ora conto direttamente i mezzi giri
-        }
+        Double_t x = xC + R * cos_diff;
+        Double_t y = yC + R * sin_diff;
+        Double_t z = z0 + s * tanLambda;
 
-        // Se il numero di **giri completi** supera `turnID`, interrompo
-        if (nHalfTurns / 2.0 >= turnID)
-        {
-            break;
-        }
-
-        turnHits.push_back(hitsCoordinates[i]);
-        turnCylinders.push_back(cylinders[i]);
+        helixPoints3D.push_back({x, y, z});
     }
 
-    // Includi sempre l'ultimo punto del semigiro
-    turnHits.push_back(hitsCoordinates[turnHits.size()]);
-    turnCylinders.push_back(cylinders[turnCylinders.size()]);
+    const int nPoints = helixPoints3D.size();
+    auto graph3D = new TPolyLine3D(nPoints);
+    for(int i = 0; i < nPoints; ++i)
+        graph3D->SetPoint(i, helixPoints3D[i][2], helixPoints3D[i][0], helixPoints3D[i][1]);
 
-    return {turnHits, turnCylinders};
+    graph3D->SetLineColor(kRed);
+    graph3D->SetLineWidth(2);
+
+    canvas->cd();
+    graph3D->Draw("same");
 }
 
 
 
-vector<Int_t> AUXALG::SplitTurns(const vector<vector<Double_t>>& hitsCoordinates) 
+void AUXALG::DrawZvsSFit(TGraph *graph, TF1 *fitFunc, TCanvas *canvas)
 {
-    vector<Int_t> turnIndices;
-    if(hitsCoordinates.size() < 3) 
-        return turnIndices;
-    
-    turnIndices.push_back(0); // Il primo indice è sempre 0
-    
-    Bool_t foundMax = false, foundMin = false;
-    
-    for(size_t i = 1; i < hitsCoordinates.size() - 1; i++)
-    {
-        Double_t yPrev = hitsCoordinates[i - 1][1];
-        Double_t yCurr = hitsCoordinates[i][1];
-        Double_t yNext = hitsCoordinates[i + 1][1];
+    if (!graph || !fitFunc || !canvas) return;
 
-        // Controlliamo se è un massimo locale
-        if(yCurr > yPrev && yCurr > yNext)
-        {
-            foundMax = true;
-        }
-        // Controlliamo se è un minimo locale
-        else if(yCurr < yPrev && yCurr < yNext)
-        {
-            foundMin = true;
-        }
+    canvas->cd();
 
-        // Se troviamo un massimo e poi un minimo (o viceversa), aggiungiamo l'indice
-        if(foundMax && foundMin)
-        {
-            turnIndices.push_back(i);
-            foundMax = false;
-            foundMin = false;
-        }
-    }
-    
-    return turnIndices;
+    graph->SetTitle("Z vs arc length s; s [cm]; Z [cm]");
+    graph->SetMarkerStyle(20);
+    graph->SetMarkerColor(kBlack);
+    graph->Draw("AP");
+
+    fitFunc->SetLineColor(kRed);
+    fitFunc->SetLineWidth(2);
+    fitFunc->Draw("same");
+
+    canvas->Update();
 }
 
 
 
-Int_t AUXALG::CountCylinders(const vector<Int_t>& cylinders)
+tuple<vector<Double_t>, vector<Double_t>, vector<Double_t>> AUXALG::GetResults(genfit::Track *fitTrack, genfit::AbsTrackRep *rep, TVector3 truePos, Double_t trueMom, Double_t trueTheta, Double_t truePhi, Bool_t normalizedPulls)
 {
-    set<Int_t> uniqueValues(cylinders.begin(), cylinders.end());
-    return uniqueValues.size();
-}
-
-
-
-TMatrixDSym AUXALG::CovFromCardinalToCylindricalMom(TMatrixDSym cov, TVector3 mom)
-{
-    // Transform a covariance matrix in x,y,z, momx, momy, momz
-    // into a covariance matrix in x, y, z, mom, theta, phi
-    TMatrixDSym covCyl(cov);
-
-    TMatrixD Jac(6, 6);
-    Jac.Zero();
-
-    Double_t p = mom.Mag();
-    Double_t pt = TMath::Hypot(mom.X(), mom.Y());
-
-    if(p == 0 || pt == 0)
-        return covCyl;
-
-    // Calculate Jacobian
-    Jac[0][0] = 1.;
-    Jac[1][1] = 1.;
-    Jac[2][2] = 1.;
-
-    Jac[3][3] = mom.X() / p;
-    Jac[3][4] = mom.Y() / p;
-    Jac[3][5] = mom.Z() / p;
-
-    Jac[4][3] = mom.X() * mom.Z() / p / p / pt;
-    Jac[4][4] = mom.Y() * mom.Z() / p / p / pt;
-    Jac[4][5] = - pt / p / p;
-
-    Jac[5][3] = - mom.Y() / pt / pt;
-    Jac[5][4] = mom.X() / pt / pt;
-    Jac[5][5] = 0.;
-
-    covCyl.Similarity(Jac);
-    return covCyl;
-}
-
-
-
-tuple<vector<Double_t>, vector<Double_t>, vector<Double_t>> AUXALG::GetResults(genfit::Track *fitTrack, genfit::AbsTrackRep *rep, Double_t trueMom, TVector3 truePos, Double_t trueTheta, Double_t truePhi)
-{   
     try
     {
         // Extrapolate to orbit
@@ -370,7 +267,7 @@ tuple<vector<Double_t>, vector<Double_t>, vector<Double_t>> AUXALG::GetResults(g
         rep->setPosMomCov(stateOrbit, posProj, momProj, covProj);
         rep->extrapolateToPlane(stateOrbit, genfit::SharedPlanePtr(new genfit::DetPlane(TVector3(0., 0., 0.), TVector3(1, 0, 0), TVector3(0, 1, 0))));
         stateOrbit.getPosMomCov(posProj, momProj, covProj);
-        covProj = AUXALG::CovFromCardinalToCylindricalMom(covProj, momProj);
+        covProj = ANS::CovFromCardinalToCylindricalMom(covProj, momProj);
         
         // Compute angles
         Double_t x = posProj.X();
@@ -383,18 +280,30 @@ tuple<vector<Double_t>, vector<Double_t>, vector<Double_t>> AUXALG::GetResults(g
 
         Double_t momProjTheta = TMath::ATan2(pz, pr); // angle in plane (e_r, z) in radiants, in (-pi, pi)
 
-        // Pulls: 
+        // Pulls:
+        Double_t dX, dY, dZ, dMom, dTheta, dPhi;
+        if(normalizedPulls)
+        {
             // Position
-        Double_t dX = (posProj.X() - truePos.X()) / sqrt(covProj(0,0));
-        Double_t dY = (posProj.Y() - truePos.Y()) / sqrt(covProj(1,1));
-        Double_t dZ = (posProj.Z() - truePos.Z()) / sqrt(covProj(2,2));
+            dX = (posProj.X() - truePos.X()) / sqrt(covProj(0,0));
+            dY = (posProj.Y() - truePos.Y()) / sqrt(covProj(1,1));
+            dZ = (posProj.Z() - truePos.Z()) / sqrt(covProj(2,2));
             // Momentum
-        Double_t dMom = (momProj.Mag()*1E3 - trueMom) / (sqrt(covProj(3,3))*1E3);
-        Double_t dTheta = (momProjTheta - trueTheta) / sqrt(covProj(4,4));
-        Double_t dPhi = TMath::ATan2(sin(momProjPhi - truePhi), cos(momProjPhi - truePhi)) / sqrt(covProj(5,5));
-        //Double_t dMom = (momProj.Mag()*1E3 - trueMom);
-        //Double_t dTheta = (momProjTheta - trueTheta);
-        //Double_t dPhi = TMath::ATan2(sin(momProjPhi - truePhi), cos(momProjPhi - truePhi));
+            dMom = (momProj.Mag()*1E3 - trueMom) / (sqrt(covProj(3,3))*1E3);
+            dTheta = (momProjTheta - trueTheta) / sqrt(covProj(4,4));
+            dPhi = TMath::ATan2(sin(momProjPhi - truePhi), cos(momProjPhi - truePhi)) / sqrt(covProj(5,5));
+        }
+        else
+        {
+            // Position
+            dX = posProj.X() - truePos.X();
+            dY = posProj.Y() - truePos.Y();
+            dZ = posProj.Z() - truePos.Z();
+            // Momentum
+            dMom = momProj.Mag()*1E3 - trueMom;
+            dTheta = momProjTheta - trueTheta;
+            dPhi = TMath::ATan2(sin(momProjPhi - truePhi), cos(momProjPhi - truePhi));
+        }
 
         return make_tuple(
             vector<Double_t>{posProj.X(), posProj.Y(), posProj.Z(), momProj.Mag()*1E3, momProjTheta, momProjPhi},
@@ -413,10 +322,44 @@ tuple<vector<Double_t>, vector<Double_t>, vector<Double_t>> AUXALG::GetResults(g
 
 
 
+tuple<vector<Double_t>, vector<Double_t>, vector<Double_t>> AUXALG::GetResults(TVectorD &fittedState, TMatrixDSym &covFittedState, TVector3 truePos, Double_t trueMom, Double_t trueTheta, Double_t truePhi, Bool_t normalizedPulls)
+{
+    // Pulls:
+    Double_t dX, dY, dZ, dMom, dTheta, dPhi;
+    if(normalizedPulls)
+    {
+        // Position
+        dX = (fittedState(0) - truePos.X()) / sqrt(covFittedState(0,0));
+        dY = (fittedState(1) - truePos.Y()) / sqrt(covFittedState(1,1));
+        dZ = (fittedState(2) - truePos.Z()) / sqrt(covFittedState(2,2));
+        // Momentum
+        dMom = (fittedState(3) - trueMom) / (sqrt(covFittedState(3,3)));
+        dTheta = remainder(fittedState(4) - trueTheta, TMath::TwoPi()) / sqrt(covFittedState(4,4));
+        dPhi = TMath::ATan2(sin(fittedState(5) - truePhi), cos(fittedState(5) - truePhi)) / sqrt(covFittedState(5,5));
+    }
+    else
+    {
+        // Position
+        dX = fittedState(0) - truePos.X();
+        dY = fittedState(1) - truePos.Y();
+        dZ = fittedState(2) - truePos.Z();
+        // Momentum
+        dMom = fittedState(3) - trueMom;
+        dTheta = remainder(fittedState(4) - trueTheta, TMath::TwoPi());
+        dPhi = TMath::ATan2(sin(fittedState(5) - truePhi), cos(fittedState(5) - truePhi));
+    }
+    
+    return make_tuple(
+        vector<Double_t>{fittedState(0), fittedState(1), fittedState(2), fittedState(3), fittedState(4), fittedState(5)},
+        vector<Double_t>{sqrt(covFittedState(0,0)), sqrt(covFittedState(1,1)), sqrt(covFittedState(2,2)), sqrt(covFittedState(3,3)), sqrt(covFittedState(4,4)), sqrt(covFittedState(5,5))},
+        vector<Double_t>{dX, dY, dZ, dMom, dTheta, dPhi}
+    );
+}
+
+
+
 vector<Double_t> AUXALG::SmearMeasurement(Int_t cylID, vector<Double_t> hitCoords)
 {
-    const Float_t Radii[7] = {1.7, 2.1, 3.7, 3.9, 6.55, 7.55, 8.55};
-
     if(cylID < 0 || cylID >= 7)
         throw out_of_range("Invalid cylinder ID");
 
@@ -424,24 +367,80 @@ vector<Double_t> AUXALG::SmearMeasurement(Int_t cylID, vector<Double_t> hitCoord
     Double_t y = hitCoords.at(1);
     Double_t z = hitCoords.at(2);
 
-    Double_t r_nominal = Radii[cylID];
-    Double_t phi_nominal = TMath::ATan2(y, x);
-
+    Double_t r_nominal = CHeT::Radii[cylID];
+    Double_t phi = TMath::ATan2(y, x);
+    Double_t rphi = r_nominal*phi;
+ 
     // --- Radial smearing ---
-    Double_t r_min = r_nominal - 0.05;
-    Double_t r_max = r_nominal + 0.05;
-    Double_t r = sqrt(r_min*r_min + (r_max*r_max - r_min*r_min)*gRandom->Rndm());
+    Double_t r = gRandom->Gaus(r_nominal, (2.*CHeT::fiberWidth) / sqrt(12));
 
-    // --- Angular smearing ---
-    Double_t dphi = 0.05 / r;
-    Double_t phi = gRandom->Uniform(phi_nominal - dphi, phi_nominal + dphi);
+    // --- Angular and longitudinal smearing ---
+    TMatrixDSym A(2);
+    A(0,0) = cos(CHeT::stereoAngle(cylID));   A(0,1) = sin(CHeT::stereoAngle(cylID));
+    A(1,0) = cos(-CHeT::stereoAngle(cylID));  A(1,1) = sin(-CHeT::stereoAngle(cylID));
 
-    // --- Longitudinal smearing ---
-    z += gRandom->Uniform(-0.05, 0.05);
+    TMatrixD A_U(2,2);
+    A_U(0,0) = A(0,0);   A_U(0,1) = A(0,1);
+    A_U(1,0) = 0.;       A_U(1,1) = 0.;
 
+    TMatrixD A_L(2,2);
+    A_L(0,0) = 0.;      A_L(0,1) = 0.;
+    A_L(1,0) = A(1,0);  A_L(1,1) = A(1,1);
+
+
+    Double_t sigmaPitch = (ANS::smearNFibers*CHeT::fiberWidth) / sqrt(12);
+
+    Double_t G_1 = gRandom->Gaus();
+    Double_t G_2 = gRandom->Gaus();
+
+    TVectorD hit_1(2);
+    hit_1(0) = rphi + sigmaPitch*G_1*cos(CHeT::stereoAngle(cylID));
+    hit_1(1) = z + sigmaPitch*G_1*sin(CHeT::stereoAngle(cylID));
+
+    TVectorD hit_2(2);
+    hit_2(0) = rphi + sigmaPitch*G_2*cos(-CHeT::stereoAngle(cylID));
+    hit_2(1) = z + sigmaPitch*G_2*sin(-CHeT::stereoAngle(cylID));
+
+    A.Invert();
+    TVectorD hitSmeared = A*A_U*hit_1 + A*A_L*hit_2;
+    
     // --- Back to cartesian ---
-    x = r*cos(phi);
-    y = r*sin(phi);
+    x = r*cos(hitSmeared(0)/r_nominal);
+    y = r*sin(hitSmeared(0)/r_nominal);
+    z = hitSmeared(1);
 
     return {x, y, z};
 }
+
+
+
+void AUXALG::AddFakeHitFromHelix(genfit::TrackCand& trackCand,
+    Int_t hitIndex,
+    Double_t sortingParameter,
+    Double_t s,
+    Double_t xC, Double_t yC, Double_t R,
+    Double_t z0, Double_t phi0, Double_t tanLambda,
+    TClonesArray &chetHitArray,
+    Double_t sigmaBig)
+{
+    const Int_t eta = 1;
+    const Double_t phi = s / R;
+    const Double_t cos_diff = cos(phi0 - eta * phi);
+    const Double_t sin_diff = sin(phi0 - eta * phi);
+
+    const Double_t x = xC + R * cos_diff;
+    const Double_t y = yC + R * sin_diff;
+    const Double_t z = z0 + s * tanLambda;
+
+    TVector3 fakeHit(x, y, z);
+
+    TMatrixDSym bigCov(3);
+    bigCov.Zero();
+    bigCov(0, 0) = sigmaBig * sigmaBig;
+    bigCov(1, 1) = sigmaBig * sigmaBig;
+    bigCov(2, 2) = sigmaBig * sigmaBig;
+
+    new(chetHitArray[hitIndex]) genfit::mySpacepointDetectorHit(fakeHit, bigCov);
+    trackCand.addHit(0, hitIndex, -1, sortingParameter);
+}
+
