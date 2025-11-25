@@ -31,7 +31,7 @@ namespace CHeT
     inline Double_t stereoAngle(Int_t cylID) { return (inStereoAngle[cylID] + outStereoAngle[cylID]) / 2.; };
 
     constexpr Double_t fiberWidth = 0.05;
-    constexpr Int_t nFibersPerSiPM = 2;
+    constexpr Int_t nFibersPerSiPM = 4;
 
     // Resolutions [cm]
     struct Resolutions
@@ -93,7 +93,7 @@ namespace ANS
 {
   // Analysis tools global values
     // Detector response
-    constexpr Int_t smearNFibers = 2;
+    constexpr Int_t smearNFibers = 4;
 
     // Pattern recognition response
     constexpr Double_t sigmaSeedPos = 0.1;    // cm
