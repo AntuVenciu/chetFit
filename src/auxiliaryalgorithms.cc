@@ -4,7 +4,7 @@ using namespace std;
 
 
 
-void AUXALG::DrawXYView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas)
+void AUXALG::DrawXYView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas, vector<vector<Double_t>> virtualCoordinates)
 {
     canvas->cd();
     auto frame = canvas->DrawFrame(-9, -9, 9, 9);
@@ -41,12 +41,30 @@ void AUXALG::DrawXYView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoor
 
     gr->Draw("PC same");
     ogr->Draw("P same");
+    
+
+    Int_t nVirtualHits = virtualCoordinates.size();
+    if(nVirtualHits > 0)
+    {
+        Double_t* xv = new Double_t[nVirtualHits];
+        Double_t* yv = new Double_t[nVirtualHits];
+        for(Int_t i = 0; i < nVirtualHits; i++)
+        {
+            xv[i] = virtualCoordinates[i].at(0);
+            yv[i] = virtualCoordinates[i].at(1);
+        }
+        TGraph *grv = new TGraph(nVirtualHits, xv, yv);
+        grv->SetMarkerStyle(24);
+        grv->SetLineColor(kGreen);
+        grv->Draw("P same");
+    }
+
     canvas->Update();
 }
 
 
 
-void AUXALG::DrawYZView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas)
+void AUXALG::DrawYZView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas, vector<vector<Double_t>> virtualCoordinates)
 {
     canvas->cd();
     auto frame = canvas->DrawFrame(-40, -9, 40, 9);
@@ -86,12 +104,30 @@ void AUXALG::DrawYZView_hits(TVector3* origin, vector<vector<Double_t>> hitsCoor
     gr->Draw("PC same");
     ogr->Draw("P same");
 
+
+    Int_t nVirtualHits = virtualCoordinates.size();
+    if(nVirtualHits > 0)
+    {
+        Double_t* zv = new Double_t[nVirtualHits];
+        Double_t* yv = new Double_t[nVirtualHits];
+        for(Int_t i = 0; i < nVirtualHits; i++)
+        {
+            zv[i] = virtualCoordinates[i].at(2);
+            yv[i] = virtualCoordinates[i].at(1);
+        }
+        TGraph *grv = new TGraph(nVirtualHits, zv, yv);
+        grv->SetMarkerStyle(24);
+        grv->SetLineColor(kGreen);
+        grv->Draw("P same");
+    }
+
+
     canvas->Update();
 }
 
 
 
-void AUXALG::DrawXYZView_hits(vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas)
+void AUXALG::DrawXYZView_hits(vector<vector<Double_t>> hitsCoordinates, TCanvas *canvas, vector<vector<Double_t>> virtualCoordinates)
 {
     canvas->cd();
 
@@ -113,6 +149,28 @@ void AUXALG::DrawXYZView_hits(vector<vector<Double_t>> hitsCoordinates, TCanvas 
     gr->SetLineColor(kBlue);
 
     gr->Draw("P LINE");
+
+
+    Int_t nVirtualHits = virtualCoordinates.size();
+    if(nVirtualHits > 0)
+    {
+        Double_t* xv = new Double_t[nVirtualHits];
+        Double_t* yv = new Double_t[nVirtualHits];
+        Double_t* zv = new Double_t[nVirtualHits];
+        
+        for(Int_t i = 0; i < nVirtualHits; ++i)
+        {
+            xv[i] = virtualCoordinates[i].at(0);
+            yv[i] = virtualCoordinates[i].at(1);
+            zv[i] = virtualCoordinates[i].at(2);
+        }
+        
+        TGraph2D *grv = new TGraph2D(nVirtualHits, zv, xv, yv);
+        grv->SetMarkerStyle(24);
+        grv->SetLineColor(kGreen);
+        
+        grv->Draw("P SAME");
+    }
 
     canvas->Update();
 }
@@ -421,6 +479,7 @@ void AUXALG::AddFakeHitFromHelix(genfit::TrackCand& trackCand,
     Double_t xC, Double_t yC, Double_t R,
     Double_t z0, Double_t phi0, Double_t tanLambda,
     TClonesArray &chetHitArray,
+    vector<TVector3> &virtualCoordinates,
     Double_t sigmaBig)
 {
     const Int_t eta = 1;
@@ -439,6 +498,8 @@ void AUXALG::AddFakeHitFromHelix(genfit::TrackCand& trackCand,
     bigCov(0, 0) = sigmaBig * sigmaBig;
     bigCov(1, 1) = sigmaBig * sigmaBig;
     bigCov(2, 2) = sigmaBig * sigmaBig;
+
+    virtualCoordinates.push_back(fakeHit);
 
     new(chetHitArray[hitIndex]) genfit::mySpacepointDetectorHit(fakeHit, bigCov);
     trackCand.addHit(0, hitIndex, -1, sortingParameter);

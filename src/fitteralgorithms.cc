@@ -5,7 +5,8 @@ using namespace ROOT;
 // Units are in cm
 
 constexpr Int_t DEBUG_LVL = 0;
-constexpr Bool_t NORMALIZED_PULLS = true;
+constexpr Bool_t NORMALIZED_PULLS = false;
+constexpr Double_t FAKEHIT_ANGLE_LIM = TMath::Pi()/3;
 
 
 void FITALG::PlanarFitter(Options opts)
@@ -296,8 +297,7 @@ void FITALG::SpacepointFitter(Options opts)
     new TGeoManager("DetectorGeometry", "CHET geometry");
     TGeoManager::Import("../chet_sim_geometry.gdml");
     genfit::MaterialEffects::getInstance()->init(new genfit::TGeoMaterialInterface());
-    Double_t B = 22.0; // kGaus // 2.2 T
-    genfit::FieldManager::getInstance()->init(new genfit::ConstField(0., 0., B));
+    genfit::FieldManager::getInstance()->init(new genfit::ConstField(0., 0., muEDM::B));
 
     // PID for positron
     const Int_t pdg = -11;
@@ -309,15 +309,6 @@ void FITALG::SpacepointFitter(Options opts)
 
     // Init fitter (maxIterations, deltaPVal) (Possible values = 20, 1.E-3)
     genfit::AbsKalmanFitter* fitter = new genfit::KalmanFitterRefTrack(20, 1.E-3);
-    //genfit::AbsKalmanFitter* fitter = new genfit::KalmanFitter(20, 1.E-3);
-    
-    //genfit::AbsKalmanFitter* fitter = new genfit::DAF(true);
-
-    // Set the annealing scheme
-    //static_cast<genfit::DAF*>(fitter)->setAnnealingScheme(1000., 1., 10);
-    //static_cast<genfit::DAF*>(fitter)->setConvergenceDeltaWeight(0.00001);
-    //fitter->setMaxIterations(20);
-
     fitter->setDebugLvl(DEBUG_LVL);
 
     // Create array of hits
@@ -454,32 +445,37 @@ void FITALG::SpacepointFitter(Options opts)
 
 
         // Prefitter
-        auto helixPars = HelixPrefitter(*(data.hitsCoordinates), *(data.cylinderID), opts);
-        Double_t xC = helixPars[0],
-                 yC = helixPars[1],
-                 R = helixPars[2],
-                 phi0 = helixPars[3],
-                 z0 = helixPars[4],
-                 tanLambda = helixPars[5];
-
-        // Cumulative arc length computation
+        Double_t xC, yC, R, phi0, z0, tanLambda;
         vector<Double_t> s_cumulative;
-        Double_t previous_phi = phi0;
-        Double_t previous_s = 0;
-
-        for(const auto& point : *(data.hitsCoordinates))
+        if(opts.usePrefitter)
         {
-            Double_t dx = point[0] - xC;
-            Double_t dy = point[1] - yC;
-            Double_t phi = atan2(dy, dx);
-            Double_t dphi = phi - previous_phi;
-            if(dphi > M_PI) dphi -= 2 * M_PI;
-            if(dphi < -M_PI) dphi += 2 * M_PI;
-            dphi *= -1;
-            Double_t s = previous_s + R * dphi;
-            s_cumulative.push_back(s);
-            previous_phi = phi;
-            previous_s = s;
+            auto helixPars = HelixPrefitter(*(data.hitsCoordinates), *(data.cylinderID), opts);
+        
+            xC = helixPars[0],
+            yC = helixPars[1],
+            R = helixPars[2],
+            phi0 = helixPars[3],
+            z0 = helixPars[4],
+            tanLambda = helixPars[5];
+            
+            // Cumulative arc length computation    
+            Double_t previous_phi = phi0;
+            Double_t previous_s = 0;
+            
+            for(const auto& point : *(data.hitsCoordinates))
+            {
+                Double_t dx = point[0] - xC;
+                Double_t dy = point[1] - yC;
+                Double_t phi = atan2(dy, dx);
+                Double_t dphi = phi - previous_phi;
+                if(dphi > M_PI) dphi -= 2 * M_PI;
+                if(dphi < -M_PI) dphi += 2 * M_PI;
+                dphi *= -1;
+                Double_t s = previous_s + R * dphi;
+                s_cumulative.push_back(s);
+                previous_phi = phi;
+                previous_s = s;
+            }
         }
 
         // Track candidate
@@ -490,6 +486,7 @@ void FITALG::SpacepointFitter(Options opts)
         
         // Fill the candidate
         vector<TVector3> measuredCoordinates;
+        vector<TVector3> virtualCoordinates;
         Int_t hitID = 0;
         Int_t nAddedHits = 0;
         for(Int_t i = 0; i < nHits; i++)
@@ -511,12 +508,14 @@ void FITALG::SpacepointFitter(Options opts)
             trackCand.addHit(detId, hitID, -1, i);
             hitID++;
 
-            if(((i + 1) < nHits) && ((s_cumulative[i+1] - s_cumulative[i])/ R > TMath::Pi()/4))
+            if(opts.usePrefitter && ((i + 1) < nHits) && ((s_cumulative[i+1] - s_cumulative[i])/ R > FAKEHIT_ANGLE_LIM))
             {
                 const Double_t s_middle = 0.5 * (s_cumulative[i] + s_cumulative[i + 1]);
                 AUXALG::AddFakeHitFromHelix(trackCand, hitID, i + 0.5,
                                             s_middle, xC, yC, R, z0, phi0, tanLambda,
-                                            chetHitArray, 1.);
+                                            chetHitArray,
+                                            virtualCoordinates,
+                                            1.);
                 nAddedHits++;
                 hitID++;
             }
@@ -529,13 +528,17 @@ void FITALG::SpacepointFitter(Options opts)
             for(const auto& vec : measuredCoordinates)
                 plottedCoordsVec.push_back({vec.X(), vec.Y(), vec.Z()});
 
+            vector<vector<Double_t>> virtualCoordsVec;
+            for(const auto& vec : virtualCoordinates)
+                virtualCoordsVec.push_back({vec.X(), vec.Y(), vec.Z()});
+
             TCanvas *canvHitsXY = new TCanvas("canvHitsXY", "canvHitsXY", 700, 700);
             TCanvas *canvHitsYZ = new TCanvas("canvHitsYZ", "canvHitsYZ", 900, 500);
             TCanvas *canvHitsXYZ = new TCanvas("canvHitsXYZ");
 
-            AUXALG::DrawXYView_hits(data.fOrigin, plottedCoordsVec, canvHitsXY);
-            AUXALG::DrawYZView_hits(data.fOrigin, plottedCoordsVec, canvHitsYZ);
-            AUXALG::DrawXYZView_hits(plottedCoordsVec, canvHitsXYZ);
+            AUXALG::DrawXYView_hits(data.fOrigin, plottedCoordsVec, canvHitsXY, virtualCoordsVec);
+            AUXALG::DrawYZView_hits(data.fOrigin, plottedCoordsVec, canvHitsYZ, virtualCoordsVec);
+            AUXALG::DrawXYZView_hits(plottedCoordsVec, canvHitsXYZ, virtualCoordsVec);
         }
 
 
@@ -637,6 +640,9 @@ void FITALG::SpacepointFitter(Options opts)
         data.effCylinders->Fill(isFitConverged, nCylinders);
         data.histTurnsVMom->Fill(data.trueMomentum, nTurns);
         data.histCylVMom->Fill(data.trueMomentum, nCylinders);
+
+        // Store pre-fit data
+        data.histFakeHits->Fill(nAddedHits);
 
         // Check
         fitTrack->checkConsistency();
@@ -747,6 +753,10 @@ void FITALG::SpacepointFitter(Options opts)
         canvResPhi->cd();
         data.hist2PhiRes->Draw();
 
+        TCanvas *canvPrefit = new TCanvas("canvPrefit");
+        canvPrefit->cd();
+        data.histFakeHits->Draw();
+
         if(opts.quietMode)
         {
             canvEfficiency->SaveAs("canvEfficiency.pdf");
@@ -760,7 +770,10 @@ void FITALG::SpacepointFitter(Options opts)
     delete fitter;
 
     // Open event display
-    display->setOptions("ABDEFGHMPT");
+    if(opts.quietMode)
+        display->setOptions("X");
+    else
+        display->setOptions("ABDEFGHMPT");
     display->open();
 
     // Finally

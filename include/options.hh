@@ -9,6 +9,7 @@ struct Options
     Bool_t turnMode = false;
     Bool_t useSmearing = false;
     Bool_t pttrecMode = false;
+    Bool_t usePrefitter = false;
     Int_t event = -1;
     Int_t eventMax = -1;
     Float_t turnID = -1;

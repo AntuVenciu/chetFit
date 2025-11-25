@@ -29,11 +29,11 @@
 
 namespace AUXALG
 {
-    void DrawXYView_hits(TVector3* origin, std::vector<std::vector<Double_t>> hitsCoordinates, TCanvas *canvas);
+    void DrawXYView_hits(TVector3* origin, std::vector<std::vector<Double_t>> hitsCoordinates, TCanvas *canvas, std::vector<std::vector<Double_t>> virtualCoordinates = {});
 
-    void DrawYZView_hits(TVector3* origin, std::vector<std::vector<Double_t>> hitsCoordinates, TCanvas *canvas);
+    void DrawYZView_hits(TVector3* origin, std::vector<std::vector<Double_t>> hitsCoordinates, TCanvas *canvas, std::vector<std::vector<Double_t>> virtualCoordinates = {});
 
-    void DrawXYZView_hits(std::vector<std::vector<Double_t>> hitsCoordinates, TCanvas *canvas);
+    void DrawXYZView_hits(std::vector<std::vector<Double_t>> hitsCoordinates, TCanvas *canvas, std::vector<std::vector<Double_t>> virtualCoordinates = {});
     
     void DrawXYView_arc(Double_t xC, Double_t yC, Double_t R, const std::vector<std::vector<Double_t>> &hitsCoordinates, TCanvas* canvas, Int_t nTurns, Float_t turnID);
 
@@ -58,6 +58,7 @@ namespace AUXALG
         Double_t xC, Double_t yC, Double_t R,
         Double_t z0, Double_t phi0, Double_t tanLambda,
         TClonesArray &chetHitArray,
+        std::vector<TVector3> &virtualCoordinates,
         Double_t sigmaBig);
 };
 

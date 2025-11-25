@@ -7,7 +7,7 @@ using namespace std;
 TrackDataManager::TrackDataManager(Int_t maxEvents)
 {
     tracksChain = new TChain("HelixTrackTree");
-    for(Int_t i = 0; i < 2; i++)
+    for(Int_t i = 0; i < 1; i++)
         tracksChain->Add(Form("../chet_sim_dataset_%d.root", i));
 
     nEvents = tracksChain->GetEntries();
@@ -62,6 +62,8 @@ TrackDataManager::TrackDataManager(Int_t maxEvents)
     profMomRes = new TProfile("profMomRes", "Profile plot: Momentum resolution;Momentum [MeV/c];#sigma_{p} [MeV/c]", 20, 0., 68.9, 0, 40.);
     profThetaRes = new TProfile("profThetaRes", "Profile plot: Theta resolution;#theta [rad];#sigma_{#theta} [rad]", 40, -TMath::Pi(), TMath::Pi(), 0., 0.5);
     profPhiRes = new TProfile("profPhiRes", "Profile plot: Phi resolution;#phi [rad];#sigma_{#phi} [rad]", 20, 0., TMath::TwoPi(), 0., 0.5);
+
+    histFakeHits = new TH1I("histFakeHits", "Number of pre-fitted hits added", 10, 0, 0);
 }
 
 

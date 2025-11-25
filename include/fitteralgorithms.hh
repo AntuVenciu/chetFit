@@ -2,6 +2,7 @@
 #define FITTERALGORITHMS_HH
 
 #include <iostream>
+#include <fstream>
 #include <unistd.h>
 #include <vector>
 #include <cmath>

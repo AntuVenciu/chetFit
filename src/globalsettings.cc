@@ -1,6 +1,13 @@
 #include "globalsettings.hh"
 
 
+namespace muEDM
+{
+    Double_t B = 22.0;  // kGaus // 2.2 T
+};
+
+
+
 TMatrixDSym ANS::CovFromCardinalToCylindricalMom(TMatrixDSym cov, TVector3 mom)
 {
     // Transform a covariance matrix in x,y,z, momx, momy, momz
@@ -69,8 +76,8 @@ TMatrixD ANS::ComputeHelixJacobian(
     Double_t dtheta_dxC = dy / rho2;
     Double_t dtheta_dyC = -dx / rho2;
     Double_t dtheta_dR  = - z0 / (R*R * tanLambda);
-    Double_t dtheta_ddz = -1.0 / (R * tanLambda);
-    Double_t dtheta_dtanL = z0 / (R * tanLambda * tanLambda);
+    Double_t dtheta_ddz = 1.0 / (R * tanLambda);
+    Double_t dtheta_dtanL = -z0 / (R * tanLambda * tanLambda);
 
     Double_t pT = k * B * R;
 

@@ -37,12 +37,15 @@ Int_t main(Int_t argc, char** argv)
     FitterType fitter = FitterType::Unknown;
 
     Int_t opt;
-    while((opt = getopt(argc, argv, "F:e:M:t:spq")) != -1)
+    while((opt = getopt(argc, argv, "F:Pe:M:t:spq")) != -1)
     {
         switch (opt)
         {
             case 'F': 
                 fitter = GetFitterTypeFromString(optarg);
+                break;
+            case 'P':
+                opts.usePrefitter = true;
                 break;
             case 'e':
                 opts.processAll = false;
@@ -67,8 +70,9 @@ Int_t main(Int_t argc, char** argv)
             case '?':
             default:
             cerr << "\n>>> Usage: " << argv[0]
-                 << " -F [planar|spacepoint] -e [eventID] -M [eventMax] -t [nTurns] -s -p -q\n\n"
+                 << " -F [planar|spacepoint|helix] -P -e [eventID] -M [eventMax] -t [nTurns] -s -p -q\n\n"
                  << "\tF: fitter type\n"
+                 << "\tP: use pre-fitter\n"
                  << "\te: single event mode\n"
                  << "\tM: multiple events mode\n"
                  << "\tt: apply turn analysis\n"

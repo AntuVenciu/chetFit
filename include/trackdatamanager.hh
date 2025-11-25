@@ -36,7 +36,7 @@ class TrackDataManager
 
     // Histos
     TEfficiency *accPhi, *accTheta, *effPhi, *effTheta;
-    TH1I *histTurns, *histCylinders;
+    TH1I *histTurns, *histCylinders, *histFakeHits;
     TEfficiency *effTurns, *effCylinders;
     TProfile *histCylVMom, *histTurnsVMom;
     TH2D *graphMom, *graphTheta, *graphPhi;

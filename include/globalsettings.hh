@@ -10,17 +10,24 @@
 #include <TMatrixDSym.h>
 
 
+namespace muEDM
+{
+    extern Double_t B;  // kGaus // 2.2 T
+};
+
+
+
 namespace CHeT
 {
   // CHeT detector global values
     // Structure [cm]
-    constexpr Int_t nCylinders = 7;
-    constexpr Float_t Radii[nCylinders] = {1.70, 2.10, 3.70, 3.90, 6.55, 7.55, 8.55};
+    constexpr Int_t nCylinders = 6;
+    constexpr Float_t Radii[nCylinders] = {1.70, 2.10, 3.70, 6.50, 6.90, 7.30};
     constexpr Float_t Length = 30;
         // NFibers ?
         // Stereo angles [rad]
-    constexpr Double_t inStereoAngle[nCylinders] = {0.3365, 0.4091, 0.6553, 0.6811, 0.7854, 0.7854, 0.7854};
-    constexpr Double_t outStereoAngle[nCylinders] = {0.3476, 0.4196, 0.6632, 0.6887, 0.7854, 0.7854, 0.7854};
+    constexpr Double_t inStereoAngle[nCylinders] = {0.3365, 0.4091, 0.6553, 0.7854, 0.7854, 0.7854};
+    constexpr Double_t outStereoAngle[nCylinders] = {0.3476, 0.4196, 0.6632, 0.7854, 0.7854, 0.7854};
     inline Double_t stereoAngle(Int_t cylID) { return (inStereoAngle[cylID] + outStereoAngle[cylID]) / 2.; };
 
     constexpr Double_t fiberWidth = 0.05;
